@@ -9,7 +9,7 @@ use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph},
-    Frame, Terminal,
+    Terminal,
 };
 
 use std::sync::OnceLock;
@@ -217,7 +217,6 @@ impl<B: Backend> Tui<B> {
         self.terminal.draw(|f| {
             // Get the full area of the terminal.
             let size = f.area();
-            println!("{}", size);
             let terminal_width = size.width;
             let terminal_height = size.height;
 
@@ -328,6 +327,24 @@ Track ID: [________________________________] [↓ Load]";
             f.render_widget(now_playing_widget, now_playing_rect);
             f.render_widget(create_new_track_widget, create_new_track_rect);
             f.render_widget(load_track_widget, load_track_rect);
+
+            let focused_input = self.current_focus;
+            let layout_area = f.area();
+            // This is just a rough layout, you'll want to calculate these based on your specific UI
+            let focused_position = match focused_input {
+                InputId::Rewind => Rect::new(1, 2, 12, 1), // Example position
+                InputId::PlayPause => Rect::new(14, 2, 12, 1),
+                InputId::Skip => Rect::new(27, 2, 12, 1),
+                // Add other cases for other inputs
+                _ => layout_area,
+            };
+
+            let focused_widget = Paragraph::new(Span::styled(
+                "[Focus Here]",
+                Style::default().fg(Color::Yellow),
+            ));
+
+            f.render_widget(focused_widget, focused_position);
         })?;
         Ok(())
     }
@@ -371,30 +388,11 @@ Track ID: [________________________________] [↓ Load]";
         }
         Ok(true)
     }
-    // Render logic based on the current focus
-    fn render_focus(&self, f: &mut Frame) {
-        let focused_input = self.current_focus;
-        let layout_area = f.area();
-        // This is just a rough layout, you'll want to calculate these based on your specific UI
-        let focused_position = match focused_input {
-            InputId::Rewind => Rect::new(1, 2, 12, 1), // Example position
-            InputId::PlayPause => Rect::new(14, 2, 12, 1),
-            InputId::Skip => Rect::new(27, 2, 12, 1),
-            // Add other cases for other inputs
-            _ => layout_area,
-        };
-
-        let focused_widget = Paragraph::new(Span::styled(
-            "[Focus Here]",
-            Style::default().fg(Color::Yellow),
-        ));
-
-        f.render_widget(focused_widget, focused_position);
-    }
 
     // Method to move the focus
     fn move_focus(&mut self, direction: Direction) {
         let current_focus = self.current_focus;
-        self.current_focus = next_focus(current_focus, direction)
+        self.current_focus = next_focus(current_focus, direction);
+        self.draw();
     }
 }
