@@ -1,5 +1,5 @@
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyEvent},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -9,20 +9,189 @@ use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph},
-    Terminal,
+    Frame, Terminal,
 };
-use std::io;
+
+use std::sync::OnceLock;
+use std::{collections::HashMap, io};
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+enum InputId {
+    Rewind,
+    PlayPause,
+    Skip,
+    Loop,
+    Scale,
+    Bpm,
+    Length,
+    Seed,
+    Generate,
+    TrackID,
+    Load,
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+#[derive(Debug)]
+struct InputNode {
+    neighbors: HashMap<Direction, InputId>,
+}
+
+static INPUT_GRAPH: OnceLock<HashMap<InputId, InputNode>> = OnceLock::new();
+
+fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
+    INPUT_GRAPH.get_or_init(|| {
+        let mut graph = HashMap::new();
+
+        graph.insert(
+            InputId::Rewind,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Right, InputId::PlayPause),
+                    (Direction::Left, InputId::Loop),
+                    (Direction::Down, InputId::Scale),
+                ]),
+            },
+        );
+
+        graph.insert(
+            InputId::PlayPause,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Right, InputId::Skip),
+                    (Direction::Left, InputId::Rewind),
+                    (Direction::Down, InputId::Scale),
+                ]),
+            },
+        );
+
+        graph.insert(
+            InputId::Skip,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Right, InputId::Loop),
+                    (Direction::Left, InputId::PlayPause),
+                    (Direction::Down, InputId::Scale),
+                ]),
+            },
+        );
+
+        graph.insert(
+            InputId::Loop,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Right, InputId::Rewind),
+                    (Direction::Left, InputId::Skip),
+                    (Direction::Down, InputId::Scale),
+                ]),
+            },
+        );
+
+        graph.insert(
+            InputId::Scale,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Right, InputId::Bpm),
+                    (Direction::Left, InputId::Length),
+                    (Direction::Down, InputId::Seed),
+                ]),
+            },
+        );
+
+        graph.insert(
+            InputId::Bpm,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Right, InputId::Length),
+                    (Direction::Left, InputId::Scale),
+                    (Direction::Down, InputId::Seed),
+                ]),
+            },
+        );
+
+        graph.insert(
+            InputId::Length,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Right, InputId::Scale),
+                    (Direction::Left, InputId::Bpm),
+                    (Direction::Down, InputId::Seed),
+                ]),
+            },
+        );
+
+        graph.insert(
+            InputId::Seed,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Up, InputId::Scale),
+                    (Direction::Down, InputId::Generate),
+                ]),
+            },
+        );
+
+        graph.insert(
+            InputId::Generate,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Up, InputId::Seed),
+                    (Direction::Down, InputId::TrackID),
+                ]),
+            },
+        );
+
+        graph.insert(
+            InputId::TrackID,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Up, InputId::Generate),
+                    (Direction::Left, InputId::Load),
+                    (Direction::Right, InputId::Load),
+                ]),
+            },
+        );
+
+        graph.insert(
+            InputId::Load,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Up, InputId::Generate),
+                    (Direction::Left, InputId::TrackID),
+                    (Direction::Right, InputId::TrackID),
+                ]),
+            },
+        );
+        graph
+    })
+}
+
+fn next_focus(current: InputId, direction: Direction) -> InputId {
+    get_input_graph()
+        .get(&current)
+        .and_then(|node| node.neighbors.get(&direction).copied())
+        .unwrap_or(current) // Return the current focus if no transition is found
+}
 
 // TUI struct represents the terminal user interface, parameterized by the type of backend (B)
 pub struct Tui<B: Backend> {
     terminal: Terminal<B>,
+    current_focus: InputId,
 }
 
 impl<B: Backend> Tui<B> {
     // Constructor method to create a new Tui instance with the provided backend
     pub fn new(backend: B) -> Result<Self, Box<dyn std::error::Error>> {
         let terminal = Terminal::new(backend)?;
-        Ok(Self { terminal })
+        Ok(Self {
+            terminal,
+            current_focus: InputId::PlayPause,
+        })
     }
 
     // Setup method to initialize raw mode and the alternate screen buffer
@@ -48,6 +217,7 @@ impl<B: Backend> Tui<B> {
         self.terminal.draw(|f| {
             // Get the full area of the terminal.
             let size = f.area();
+            println!("{}", size);
             let terminal_width = size.width;
             let terminal_height = size.height;
 
@@ -162,12 +332,69 @@ Track ID: [________________________________] [↓ Load]";
         Ok(())
     }
     // Method to handle user input
-    pub fn handle_input(&self) -> io::Result<bool> {
-        if let Event::Key(key) = event::read()? {
-            if key.code == KeyCode::Char('q') {
-                return Ok(false);
+    pub fn handle_input(&mut self) -> std::io::Result<bool> {
+        match event::read()? {
+            // Handle key events
+            Event::Key(KeyEvent { code, .. }) => {
+                match code {
+                    KeyCode::Char('q') => {
+                        // Quit the app when 'q' is pressed
+                        return Ok(false);
+                    }
+                    KeyCode::Enter => {
+                        // Handle the Enter key
+                        println!("Enter pressed");
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        // Handle Up arrow or vim 'k'
+                        self.move_focus(Direction::Up);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        // Handle Down arrow or vim 'j'
+                        self.move_focus(Direction::Down);
+                    }
+                    KeyCode::Left | KeyCode::Char('h') => {
+                        // Handle Left arrow or vim 'h'
+                        self.move_focus(Direction::Left);
+                    }
+                    KeyCode::Right | KeyCode::Char('l') => {
+                        // Handle Right arrow or vim 'l'
+                        self.move_focus(Direction::Right);
+                    }
+                    _ => {
+                        // For other keys, do nothing or add custom logic
+                    }
+                }
             }
+            // Ignore non-key events (e.g., mouse events, focus events)
+            _ => {}
         }
         Ok(true)
+    }
+    // Render logic based on the current focus
+    fn render_focus(&self, f: &mut Frame) {
+        let focused_input = self.current_focus;
+        let layout_area = f.area();
+        // This is just a rough layout, you'll want to calculate these based on your specific UI
+        let focused_position = match focused_input {
+            InputId::Rewind => Rect::new(1, 2, 12, 1), // Example position
+            InputId::PlayPause => Rect::new(14, 2, 12, 1),
+            InputId::Skip => Rect::new(27, 2, 12, 1),
+            // Add other cases for other inputs
+            _ => layout_area,
+        };
+
+        let focused_widget = Paragraph::new(Span::styled(
+            "[Focus Here]",
+            Style::default().fg(Color::Yellow),
+        ));
+
+        f.render_widget(focused_widget, focused_position);
+    }
+
+    // Method to move the focus
+    fn move_focus(&mut self, direction: Direction) {
+        let current_focus = self.current_focus;
+        self.current_focus = next_focus(current_focus, direction)
     }
 }

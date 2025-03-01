@@ -12,7 +12,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         tui.draw()?;
-
         if !tui.handle_input()? {
             break;
         }
