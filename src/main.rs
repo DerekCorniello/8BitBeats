@@ -8,7 +8,30 @@ use std::time::Duration;
 
 use rodio::buffer::SamplesBuffer;
 use rodio::{OutputStream, Sink, Source};
-use rust_music_theory::chord::{Number as ChordNumber, Quality as ChordQuality};
+
+fn play_progression(
+    prog_name: String,
+    root_note: u8,
+    chord_duration: f32,
+    mut audio_sequence: Vec<f32>,
+) -> Vec<f32> {
+    println!("Playing progression...");
+    // Get the progression chords
+    let progression = progs::get_progression(prog_name, root_note, chord_duration);
+
+    // Short silence between segments
+    let silence_duration_samples = (44100.0 * 0.0) as usize; // 300ms
+    let silence_samples = vec![0.0; silence_duration_samples]; // Silence is represented by zeros
+
+    // Add each chord to the sequence with silence in between
+    for chord in progression {
+        audio_sequence.extend_from_slice(&chord);
+        audio_sequence.extend_from_slice(&silence_samples);
+    }
+
+    // Return the modified sequence
+    audio_sequence
+}
 
 fn read_char() -> Option<char> {
     // Create a 1-byte buffer to store the character
@@ -57,8 +80,7 @@ fn main() {
     println!("2. Pop progression (I-V-vi-IV)");
     println!("3. Jazz progression (ii-V-I)");
     println!("4. Simple progression (I-IV)");
-    println!("5. Custom C-F progression (with mixed chords)");
-    println!("\nEnter choice (1-5): ");
+    println!("\nEnter choice (1-4): ");
 
     // Read user choice
     let mut choice = String::new();
@@ -76,86 +98,32 @@ fn main() {
     // Create our audio sequence based on user choice
     let mut audio_sequence = Vec::new();
 
-    // Short silence between segments
-    let silence_duration_samples = (sample_rate as f32 * 0.3) as usize; // 300ms
-    let silence_samples = vec![0.0; silence_duration_samples]; // Silence is represented by zeros
-
-    match choice {
-        "1" => {
-            println!("Playing blues progression...");
-            // Get the blues progression chords
-            let progression =
-                progs::get_progression("blues".to_string(), root_note, chord_duration);
-
-            // Add each chord to the sequence with silence in between
-            for chord in progression {
-                audio_sequence.extend_from_slice(&chord);
-                audio_sequence.extend_from_slice(&silence_samples);
-            }
-        }
-        "2" => {
-            println!("Playing pop progression...");
-            let progression = progs::get_progression("pop".to_string(), root_note, chord_duration);
-
-            for chord in progression {
-                audio_sequence.extend_from_slice(&chord);
-                audio_sequence.extend_from_slice(&silence_samples);
-            }
-        }
-        "3" => {
-            println!("Playing jazz progression...");
-            let progression = progs::get_progression("jazz".to_string(), root_note, chord_duration);
-
-            for chord in progression {
-                audio_sequence.extend_from_slice(&chord);
-                audio_sequence.extend_from_slice(&silence_samples);
-            }
-        }
-        "4" => {
-            println!("Playing simple I-IV progression...");
-            let progression =
-                progs::get_progression("default".to_string(), root_note, chord_duration);
-
-            for chord in progression {
-                audio_sequence.extend_from_slice(&chord);
-                audio_sequence.extend_from_slice(&silence_samples);
-            }
-        }
-        "5" | _ => {
-            println!("Playing custom C-F progression with mixed chords...");
-
-            // Generate chord samples using the root note the user provided
-            let root_chord_samples = progs::generate_chord_samples(
-                progs::get_pitch(root_note),
-                ChordQuality::Major,
-                ChordNumber::Triad,
-                chord_duration,
-                sample_rate,
-            );
-
-            // Generate fourth chord (five semitones up from root)
-            let fourth_chord_samples = progs::generate_chord_samples(
-                progs::get_pitch(root_note + 5),
-                ChordQuality::Major,
-                ChordNumber::Triad,
-                chord_duration,
-                sample_rate,
-            );
-
-            // Mix them for the third part
-            let chords_to_mix = vec![root_chord_samples.clone(), fourth_chord_samples.clone()];
-            let chord_volumes = vec![0.5, 0.5]; // Equal volume for both chords
-            let combined_chord_samples = progs::mix_samples(chords_to_mix, &chord_volumes);
-
-            // Create sequence: root chord, fourth chord, then both together
-            audio_sequence.extend_from_slice(&root_chord_samples);
-            // audio_sequence.extend_from_slice(&silence_samples);
-            audio_sequence.extend_from_slice(&fourth_chord_samples);
-            // audio_sequence.extend_from_slice(&silence_samples);
-            audio_sequence.extend_from_slice(&combined_chord_samples);
-            // audio_sequence.extend_from_slice(&silence_samples);
-        }
-    }
+    audio_sequence = match choice {
+        "1" => play_progression(
+            String::from("blues"),
+            root_note,
+            chord_duration,
+            audio_sequence,
+        ),
+        "2" => play_progression(
+            String::from("pop"),
+            root_note,
+            chord_duration,
+            audio_sequence,
+        ),
+        "3" => play_progression(
+            String::from("jazz"),
+            root_note,
+            chord_duration,
+            audio_sequence,
+        ),
+        _ => play_progression(
+            String::from("default"),
+            root_note,
+            chord_duration,
+            audio_sequence,
+        ),
+    };
 
     // Set up audio output system
     let (_stream, stream_handle) =
@@ -261,8 +229,6 @@ fn main() {
     if let Err(e) = playback_thread.join() {
         eprintln!("Error joining playback thread: {:?}", e);
     }
-
-    // Make sure we're marked as not running
 
     // Wait for the input thread to finish
     if let Err(e) = input_thread.join() {
