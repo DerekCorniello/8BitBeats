@@ -328,15 +328,21 @@ Track ID: [________________________________] [↓ Load]";
             f.render_widget(create_new_track_widget, create_new_track_rect);
             f.render_widget(load_track_widget, load_track_rect);
 
+            // rerender a state change
             let focused_input = self.current_focus;
-            let layout_area = f.area();
             // This is just a rough layout, you'll want to calculate these based on your specific UI
             let focused_position = match focused_input {
-                InputId::Rewind => Rect::new(1, 2, 12, 1), // Example position
+                InputId::Rewind => Rect::new(1, 2, 12, 1),
                 InputId::PlayPause => Rect::new(14, 2, 12, 1),
                 InputId::Skip => Rect::new(27, 2, 12, 1),
-                // Add other cases for other inputs
-                _ => layout_area,
+                InputId::Loop => Rect::new(1, 20, 12, 1),
+                InputId::Scale => Rect::new(14, 20, 12, 1),
+                InputId::Bpm => Rect::new(27, 20, 12, 1),
+                InputId::Length => Rect::new(1, 50, 12, 1),
+                InputId::Seed => Rect::new(14, 50, 12, 1),
+                InputId::Generate => Rect::new(27, 50, 12, 1),
+                InputId::TrackID => Rect::new(14, 60, 12, 1),
+                InputId::Load => Rect::new(27, 60, 12, 1),
             };
 
             let focused_widget = Paragraph::new(Span::styled(
