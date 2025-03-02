@@ -1,4 +1,6 @@
+mod gen;
 mod melodies;
+mod progs;
 mod tui;
 mod gen;
 use crate::tui::Tui;
@@ -27,8 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let audio_sink = Sink::try_new(&stream_handle).expect("Failed to create audio sink");
 
         // Prepare audio data and set it to repeat
-        let audio_source =
-            SamplesBuffer::new(1, 44100, all_samples.clone()).repeat_infinite();
+        let audio_source = SamplesBuffer::new(1, 44100, all_samples.clone()).repeat_infinite();
 
         // Add the audio to the sink
         audio_sink.append(audio_source);
