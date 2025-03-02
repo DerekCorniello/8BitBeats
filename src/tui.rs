@@ -203,6 +203,29 @@ fn next_focus(current: InputId, direction: Direction) -> InputId {
         .unwrap_or(current) // Return the current focus if no transition is found
 }
 
+fn create_progress_bar(progress: f64) -> Paragraph<'static> {
+    // Ensure progress is between 0 and 1
+    let progress = progress.clamp(0.0, 1.0);
+
+    // Calculate the number of filled and empty blocks
+    let total_blocks = 30; // Total number of blocks in your progress bar
+    let filled_blocks = (progress * total_blocks as f64).round() as usize;
+    let empty_blocks = total_blocks - filled_blocks;
+
+    // Create the progress bar string
+    let filled = "█".repeat(filled_blocks);
+    let empty = "░".repeat(empty_blocks);
+
+    // Calculate percentage
+    let percentage = (progress * 100.0).round() as usize;
+
+    // Combine into final string
+    let progress_str = format!("{}{}   [{}%]", filled, empty, percentage);
+
+    // Create and return the Paragraph
+    Paragraph::new(progress_str).alignment(Alignment::Center)
+}
+
 // Input mode to determine how to handle user input
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InputMode {
@@ -464,17 +487,8 @@ impl<B: Backend> Tui<B> {
             f.render_widget(track_info, now_playing_layout[0]);
 
             // Progress bar
-            let length = self
-                .state
-                .length
-                .split_whitespace()
-                .next()
-                .unwrap()
-                .parse::<f32>()
-                .unwrap();
 
-            let progress_bar = Paragraph::new("██████████████████░░░░░░░░░░░░░░░░░░░░   [50%]")
-                .alignment(Alignment::Center);
+            let progress_bar = create_progress_bar(self.state.progress as f64);
             f.render_widget(progress_bar, now_playing_layout[2]);
 
             // Controls layout for Now Playing section
@@ -1138,6 +1152,18 @@ impl<B: Backend> Tui<B> {
                                 // Handle play/pause toggle
                                 (self.state.elapsed_play_time, self.state.start_time) =
                                     self::Tui::<B>::toggle_play(self);
+
+                                self.state.progress = self.state.elapsed_play_time
+                                    / self
+                                        .state
+                                        .length
+                                        .split_whitespace()
+                                        .next()
+                                        .unwrap()
+                                        .parse::<f32>()
+                                        .unwrap();
+
+                                self.draw().unwrap();
                             }
                             InputId::Skip => {
                                 // Fast forward (Skip to the next song)
