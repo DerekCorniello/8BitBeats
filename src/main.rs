@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         tui.draw()?;
         let all_samples =
-            melodies::create_custom_melody(0, "diatonic", "major", 4, "simple", 10.0, 120);
+            melodies::create_custom_melody(0, "diatonic", "major", 4, "syncopated", 10.0, 120);
 
         let (_stream, stream_handle) =
             OutputStream::try_default().expect("Failed to get output stream");

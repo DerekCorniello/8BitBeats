@@ -94,13 +94,13 @@ pub fn generate_melody_samples(
 
     let mut durations: Vec<f32> = vec![];
     let mut dur_sum = 0.0;
+    let quarter_note_duration = 60.0 / bpm as f32; // Duration of one quarter note in seconds
     // Apply rhythm pattern
     let durations = match rhythm_pattern {
         RhythmPattern::Simple => {
             // All quarter notes
 
             // Calculate how many quarter notes fit in the total duration
-            let quarter_note_duration = 60.0 / bpm as f32; // Duration of one quarter note in seconds
             let num_quarter_notes =
                 (duration_seconds as f32 / quarter_note_duration).floor() as usize; // Number of full quarter notes
 
@@ -113,7 +113,7 @@ pub fn generate_melody_samples(
 
             while dur_sum < duration_seconds as f32 {
                 // 50% chance of quarter note, 50% chance of eighth note
-                let duration = if rng.random::<bool>() { 1.0 } else { 0.5 };
+                let duration = if rng.random::<bool>() { 1.0 * quarter_note_duration} else { 0.5 * quarter_note_duration};
                 durations.push(duration);
                 dur_sum += duration;
             }
@@ -132,8 +132,7 @@ pub fn generate_melody_samples(
                 } else {
                     0.25 // sixteenth
                 };
-
-                dur_sum += duration;
+                dur_sum += duration * quarter_note_duration;
                 durations.push(duration);
             }
 
@@ -162,7 +161,7 @@ pub fn generate_melody_samples(
                     }
                 };
 
-                dur_sum += duration;
+                dur_sum += duration * quarter_note_duration;
                 i += 1;
                 durations.push(duration);
             }
