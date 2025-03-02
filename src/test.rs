@@ -1,8 +1,7 @@
-extern crate rust_music_theory as rustmt;
-use crate::rustmt::chord::{Chord, Number as ChordNumber, Quality as ChordQuality};
-use crate::rustmt::note::{Note, Notes, PitchClass};
 use dasp_signal::Signal;
 use rodio::{buffer::SamplesBuffer, OutputStream, Sink, Source};
+use rust_music_theory::chord::{Chord, Number as ChordNumber, Quality as ChordQuality};
+use rust_music_theory::note::{Note, Notes, PitchClass};
 use std::io::{stdin, Read};
 use std::sync::{Arc, Mutex};
 use std::thread;
