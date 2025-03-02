@@ -864,7 +864,7 @@ impl<B: Backend> Tui<B> {
         }
     }
 
-    fn pause_play() {
+    pub fn pause_play(&mut self) {
         if MUSIC_PAUSED.load(Ordering::SeqCst) {
             Tui::<B>::resume_music(); // If paused, resume
         } else {
@@ -1109,6 +1109,7 @@ impl<B: Backend> Tui<B> {
                             }
                             InputId::PlayPause => {
                                 // Handle play/pause action
+                                self.pause_play();
                             }
                             InputId::Skip => {
                                 // Handle skip action
