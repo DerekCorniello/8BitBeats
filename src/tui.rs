@@ -249,7 +249,8 @@ impl Default for AppState {
         let lengths = vec![
             "5 sec".to_string(),
             "1 min".to_string(),
-            "3 min".to_string(),
+            "2 min".to_string(),
+            "5 min".to_string(),
             "10 min".to_string(),
             "20 min".to_string(),
             "30 min".to_string(),
