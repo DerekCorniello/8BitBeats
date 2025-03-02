@@ -1,4 +1,4 @@
-use crate::gen::play_music;
+use crate::gen::{get_music_sender, pause_music, resume_music, start_music_in_thread};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
@@ -17,9 +17,12 @@ use ratatui::{
 use std::{
     collections::HashMap,
     io,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        OnceLock,
+    },
 };
-
+static IS_PLAYING: AtomicBool = AtomicBool::new(false);
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 enum InputId {
     Rewind,
@@ -837,13 +840,6 @@ impl<B: Backend> Tui<B> {
         Ok(())
     }
 
-    pub fn pause_play(&mut self) {
-        // TODO: Spawn a non-blocking thread that can be signaled to
-        // pause and play, as well as be killed if we no longer want
-        // the sound to be active. I want this to run `play_music()`
-        // asynchronously in the background
-    }
-
     // Method to handle user input
     pub fn handle_input(&mut self) -> std::io::Result<bool> {
         match event::read()? {
@@ -1080,8 +1076,37 @@ impl<B: Backend> Tui<B> {
                                 // Handle rewind action
                             }
                             InputId::PlayPause => {
-                                // Handle play/pause action
-                                self.pause_play();
+                                let currently_playing = IS_PLAYING.load(Ordering::SeqCst);
+                                println!("UI: before - IS_PLAYING = {}", currently_playing);
+
+                                if currently_playing {
+                                    // Music is playing, so pause it
+                                    if pause_music().is_ok() {
+                                        IS_PLAYING.store(false, Ordering::SeqCst);
+                                        println!("Music paused");
+                                    }
+                                } else {
+                                    // Check if a sender exists without holding the lock during resume_music()
+                                    let should_resume = {
+                                        let sender = get_music_sender().lock().unwrap();
+                                        sender.is_some()
+                                    };
+
+                                    if should_resume {
+                                        if resume_music().is_ok() {
+                                            IS_PLAYING.store(true, Ordering::SeqCst);
+                                            println!("Music resumed");
+                                        }
+                                    } else {
+                                        start_music_in_thread().unwrap();
+                                        IS_PLAYING.store(true, Ordering::SeqCst);
+                                        println!("Music started");
+                                    }
+                                }
+                                println!(
+                                    "UI: after - IS_PLAYING = {}",
+                                    IS_PLAYING.load(Ordering::SeqCst)
+                                );
                             }
                             InputId::Skip => {
                                 // Handle skip action

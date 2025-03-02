@@ -3,6 +3,10 @@ use crate::progs;
 
 use rodio::buffer::SamplesBuffer;
 use rodio::{OutputStream, Sink, Source};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::Duration;
 
 fn play_progression(prog_name: String, root_note: u8, chord_duration: f32) -> Vec<f32> {
     // Get the progression chords
@@ -18,6 +22,127 @@ fn play_progression(prog_name: String, root_note: u8, chord_duration: f32) -> Ve
     audio_sequence
 }
 
+pub enum MusicControl {
+    Pause,
+    Resume,
+    Terminate,
+}
+
+pub struct MusicPlayer {
+    receiver: Receiver<MusicControl>,
+    paused: bool,
+    running: bool,
+}
+
+impl MusicPlayer {
+    pub fn new(receiver: Receiver<MusicControl>) -> Self {
+        MusicPlayer {
+            receiver,
+            paused: false,
+            running: true,
+        }
+    }
+
+    pub fn check_control(&mut self) {
+        loop {
+            match self.receiver.try_recv() {
+                Ok(MusicControl::Pause) => {
+                    println!("Received Pause command");
+                    self.paused = true;
+                }
+                Ok(MusicControl::Resume) => {
+                    println!("Received Resume command");
+                    self.paused = false;
+                }
+                Ok(MusicControl::Terminate) => {
+                    println!("Received Terminate command");
+                    self.running = false;
+                    self.paused = false;
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    println!("Channel disconnected");
+                    self.running = false;
+                    break;
+                }
+            }
+        }
+    }
+    pub fn should_play(&self) -> bool {
+        self.running && !self.paused
+    }
+
+    pub fn should_continue(&self) -> bool {
+        self.running
+    }
+}
+
+// Set up the global sender
+static MUSIC_SENDER: OnceLock<Mutex<Option<mpsc::Sender<MusicControl>>>> = OnceLock::new();
+
+pub fn get_music_sender() -> &'static Mutex<Option<mpsc::Sender<MusicControl>>> {
+    MUSIC_SENDER.get_or_init(|| Mutex::new(None))
+}
+
+// Control functions that can be called from your frontend
+pub fn pause_music() -> Result<(), &'static str> {
+    let sender = get_music_sender().lock().unwrap();
+    if let Some(tx) = &*sender {
+        println!("Sending Pause command");
+        tx.send(MusicControl::Pause)
+            .map_err(|_| "Failed to send pause command")
+    } else {
+        Err("No music is currently playing")
+    }
+}
+
+pub fn resume_music() -> Result<(), &'static str> {
+    let sender = get_music_sender().lock().unwrap();
+
+    if sender.is_some() {
+        println!("UI: Global sender exists. Will attempt resume.");
+        // Resume branch
+    } else {
+        println!("UI: No global sender. Starting new playback.");
+        // Start new playback branch
+    }
+
+    if let Some(tx) = &*sender {
+        println!("Sending Resume command");
+        tx.send(MusicControl::Resume)
+            .map_err(|_| "Failed to send resume command")
+    } else {
+        Err("No music is currently playing")
+    }
+}
+
+
+pub fn stop_music() -> Result<(), &'static str> {
+    let sender = get_music_sender().lock().unwrap();
+
+    if let Some(tx) = &*sender {
+        tx.send(MusicControl::Terminate)
+            .map_err(|_| "Failed to send terminate command")
+    } else {
+        Err("No music is currently playing")
+    }
+}
+
+// Function to start music in a separate thread
+pub fn start_music_in_thread() -> Result<(), &'static str> {
+    let sender = get_music_sender().lock().unwrap();
+    if sender.is_some() {
+        return Err("Music is already playing");
+    }
+    drop(sender);
+
+    thread::spawn(|| {
+        play_music();
+    });
+
+    Ok(())
+}
+
 pub fn play_music() {
     const SAMPLE_RATE: u32 = 44100; // CD-quality audio (44.1 kHz)
     let root_note = 0;
@@ -28,6 +153,16 @@ pub fn play_music() {
     let style = "blues";
     let seed = 1;
 
+    let (tx, rx) = mpsc::channel();
+
+    // Store the sender globally
+    {
+        let mut sender = get_music_sender().lock().unwrap();
+        *sender = Some(tx);
+    }
+
+    // Create the player with the receiver
+    let mut player = MusicPlayer::new(rx);
     let melody = melodies::get_melody(style, root_note, duration as u32, bpm as u32, seed);
 
     let chord_sequence = match style {
@@ -69,8 +204,17 @@ pub fn play_music() {
     audio_sink.append(audio_source);
 
     // Continue until the sink is empty or we're told to stop
-    while !audio_sink.empty() {
-        // Check if playback should be paused
-        audio_sink.play();
+
+    while player.should_continue() {
+        player.check_control();
+
+        if player.should_play() {
+            audio_sink.play();
+        } else {
+            audio_sink.pause();
+        }
+
+        // Sleep a bit to reduce CPU usage
+        thread::sleep(Duration::from_millis(100));
     }
 }
