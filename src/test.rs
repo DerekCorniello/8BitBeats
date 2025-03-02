@@ -14,19 +14,19 @@ fn note_to_midi(note: &Note) -> i32 {
     // Get the semitone offset based on the pitch class (like C, D, E, etc.)
     let semitone = match note.pitch_class {
         PitchClass::C => 0,
-        PitchClass::Cs => 1,  // C sharp
+        PitchClass::Cs => 1, // C sharp
         PitchClass::D => 2,
-        PitchClass::Ds => 3,  // D sharp
+        PitchClass::Ds => 3, // D sharp
         PitchClass::E => 4,
         PitchClass::F => 5,
-        PitchClass::Fs => 6,  // F sharp
+        PitchClass::Fs => 6, // F sharp
         PitchClass::G => 7,
-        PitchClass::Gs => 8,  // G sharp
+        PitchClass::Gs => 8, // G sharp
         PitchClass::A => 9,
         PitchClass::As => 10, // A sharp
         PitchClass::B => 11,
     };
-    
+
     // Calculate MIDI number based on octave and semitone
     // Formula: (octave+1) * 12 + semitone
     ((note.octave + 1) * 12 + semitone) as i32
@@ -36,7 +36,7 @@ fn note_to_midi(note: &Note) -> i32 {
 /// This uses the standard formula to convert MIDI note numbers to frequency.
 fn note_to_frequency(note: &Note) -> f32 {
     let midi_number = note_to_midi(note) as f32;
-    
+
     // Standard formula to convert MIDI note to frequency:
     // A4 (MIDI 69) = 440Hz, and each semitone is a factor of 2^(1/12)
     440.0 * 2f32.powf((midi_number - 69.0) / 12.0)
@@ -45,15 +45,15 @@ fn note_to_frequency(note: &Note) -> f32 {
 /// Generate chord samples.
 /// This creates the sound data for a chord with the given properties.
 fn generate_chord_samples(
-    root_note: PitchClass,         // The root note of the chord (C, D, etc.)
-    chord_quality: ChordQuality,   // Major, minor, diminished, etc.
-    chord_type: ChordNumber,       // Triad, seventh, ninth, etc.
-    duration_seconds: u32,         // How long the chord should play
-    sample_rate: u32,              // Audio quality (samples per second)
+    root_note: PitchClass,       // The root note of the chord (C, D, etc.)
+    chord_quality: ChordQuality, // Major, minor, diminished, etc.
+    chord_type: ChordNumber,     // Triad, seventh, ninth, etc.
+    duration_seconds: u32,       // How long the chord should play
+    sample_rate: u32,            // Audio quality (samples per second)
 ) -> Vec<f32> {
     // Create a chord object using the music theory library
     let chord = Chord::new(root_note, chord_quality, chord_type);
-    
+
     // Get the actual notes in the chord
     let chord_notes = chord.notes();
 
@@ -71,10 +71,10 @@ fn generate_chord_samples(
     let mut note_generators: Vec<_> = note_frequencies
         .iter()
         .map(|&freq| {
-            dasp_signal::rate(sample_rate as f64)  // Set the sample rate
-                .const_hz(freq as f64)            // Create a constant frequency
-                .sine()                           // Generate a sine wave
-                .map(|x| (x * 0.3) as f32)        // Reduce amplitude to avoid distortion
+            dasp_signal::rate(sample_rate as f64) // Set the sample rate
+                .const_hz(freq as f64) // Create a constant frequency
+                .sine() // Generate a sine wave
+                .map(|x| (x * 0.3) as f32) // Reduce amplitude to avoid distortion
         })
         .collect();
 
@@ -86,7 +86,7 @@ fn generate_chord_samples(
     for _ in 0..total_samples {
         // Sum all the sine waves together
         let sample_sum: f32 = note_generators.iter_mut().map(|sine| sine.next()).sum();
-        
+
         // Average the samples to avoid clipping
         chord_samples.push(sample_sum / note_frequencies.len() as f32);
     }
@@ -134,11 +134,11 @@ fn mix_samples(sample_collections: Vec<Vec<f32>>, volume_levels: &[f32]) -> Vec<
 fn read_char() -> Option<char> {
     // Create a 1-byte buffer to store the character
     let mut buffer = [0; 1];
-    
+
     // Try to read exactly one byte from standard input
     match stdin().read_exact(&mut buffer) {
-        Ok(_) => Some(buffer[0] as char),  // Convert the byte to a character
-        Err(_) => None,                    // Return None if reading failed
+        Ok(_) => Some(buffer[0] as char), // Convert the byte to a character
+        Err(_) => None,                   // Return None if reading failed
     }
 }
 
@@ -167,25 +167,25 @@ fn reset_terminal() {
 
 fn main() {
     // Audio settings
-    let sample_rate = 44100;         // CD-quality audio (44.1 kHz)
-    let chord_duration = 3;          // Duration of each chord segment in seconds
+    let sample_rate = 44100; // CD-quality audio (44.1 kHz)
+    let chord_duration = 3; // Duration of each chord segment in seconds
 
     // Generate the first chord: C major (I chord)
     println!("Generating C Major chord...");
     let c_major_samples = generate_chord_samples(
-        PitchClass::C,               // Root note C
-        ChordQuality::Major,         // Major chord
-        ChordNumber::Triad,          // Three notes (root, third, fifth)
-        chord_duration,              // Duration in seconds
-        sample_rate,                 // Audio quality
+        PitchClass::C,       // Root note C
+        ChordQuality::Major, // Major chord
+        ChordNumber::Triad,  // Three notes (root, third, fifth)
+        chord_duration,      // Duration in seconds
+        sample_rate,         // Audio quality
     );
 
     // Generate the second chord: F major (IV chord, harmonizes well with C)
     println!("Generating F Major chord...");
     let f_major_samples = generate_chord_samples(
-        PitchClass::F,               // Root note F
-        ChordQuality::Major,         // Major chord
-        ChordNumber::Triad,          // Three notes
+        PitchClass::F,       // Root note F
+        ChordQuality::Major, // Major chord
+        ChordNumber::Triad,  // Three notes
         chord_duration,
         sample_rate,
     );
@@ -193,22 +193,22 @@ fn main() {
     // Mix the two chords together
     println!("Mixing chord pair...");
     let chords_to_mix = vec![c_major_samples.clone(), f_major_samples.clone()];
-    let chord_volumes = vec![0.5, 0.5];  // Equal volume for both chords
+    let chord_volumes = vec![0.5, 0.5]; // Equal volume for both chords
     let combined_chord_samples = mix_samples(chords_to_mix, &chord_volumes);
 
     // Create a sequence of all sounds: C major, F major, then both together
     let mut audio_sequence = Vec::new();
-    audio_sequence.extend_from_slice(&c_major_samples);  // Add C major chord
+    audio_sequence.extend_from_slice(&c_major_samples); // Add C major chord
 
     // Add a short silence between segments
     let silence_duration_samples = (sample_rate as f32 * 0.3) as usize; // 300ms
-    let silence_samples = vec![0.0; silence_duration_samples];  // Silence is represented by zeros
+    let silence_samples = vec![0.0; silence_duration_samples]; // Silence is represented by zeros
     audio_sequence.extend_from_slice(&silence_samples);
 
     // Add F major chord
     audio_sequence.extend_from_slice(&f_major_samples);
     audio_sequence.extend_from_slice(&silence_samples);
-    
+
     // Add the mixed chord (both played together)
     audio_sequence.extend_from_slice(&combined_chord_samples);
     audio_sequence.extend_from_slice(&silence_samples);
@@ -220,8 +220,8 @@ fn main() {
     // Create shared state variables for thread communication
     // Arc = Atomic Reference Counting (allows sharing between threads)
     // Mutex = Mutual Exclusion (ensures only one thread can modify at a time)
-    let is_playback_paused = Arc::new(Mutex::new(false));  // Tracks if playback is paused
-    let should_continue_running = Arc::new(Mutex::new(true));  // Tracks if program should continue running
+    let is_playback_paused = Arc::new(Mutex::new(false)); // Tracks if playback is paused
+    let should_continue_running = Arc::new(Mutex::new(true)); // Tracks if program should continue running
 
     // Clone the Arcs for the input thread
     // This creates new references to the same shared data
@@ -246,7 +246,7 @@ fn main() {
                         let mut playback_state = is_playback_paused_for_input.lock().unwrap();
                         // Toggle the paused state
                         *playback_state = !*playback_state;
-                        
+
                         // Print appropriate message
                         if *playback_state {
                             println!("\nPlayback paused. Press SPACE to resume.");
@@ -285,11 +285,11 @@ fn main() {
         while *should_continue_running.lock().unwrap() {
             // Create a new audio sink (output)
             let audio_sink = Sink::try_new(&stream_handle).expect("Failed to create audio sink");
-            
+
             // Prepare audio data and set it to repeat
             let audio_source =
                 SamplesBuffer::new(1, sample_rate, audio_sequence.clone()).repeat_infinite();
-            
+
             // Add the audio to the sink
             audio_sink.append(audio_source);
 
@@ -313,7 +313,7 @@ fn main() {
                 audio_sink.stop();
             }
         }
-        
+
         // Wait for the input thread to finish
         input_thread.join().unwrap();
 
