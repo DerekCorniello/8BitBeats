@@ -8,7 +8,7 @@ use rodio::{OutputStream, Sink, Source};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tui::AppState;
 
 fn play_progression(prog_name: String, root_note: u8, chord_duration: f32) -> Vec<f32> {
@@ -224,17 +224,17 @@ pub fn play_music(root_note: u8, bpm: u32, duration: f32, style: &str, seed: u64
     audio_sink.append(audio_source);
 
     // Continue until the sink is empty or we're told to stop
-
+    let mut last_update = Instant::now();
     while player.should_continue() {
+        let now = Instant::now();
+        let delta_time = now.duration_since(last_update).as_secs_f32();
+        last_update = now;
         player.check_control();
 
         if player.should_play() {
             audio_sink.play();
-        } else {
-            audio_sink.pause();
         }
-
         // Sleep a bit to reduce CPU usage
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(1));
     }
 }

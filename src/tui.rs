@@ -22,6 +22,8 @@ use std::{
         OnceLock,
     },
 };
+
+use std::time::{Duration, Instant};
 static IS_PLAYING: AtomicBool = AtomicBool::new(false);
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 enum InputId {
@@ -57,7 +59,6 @@ static INPUT_GRAPH: OnceLock<HashMap<InputId, InputNode>> = OnceLock::new();
 fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
     INPUT_GRAPH.get_or_init(|| {
         let mut graph = HashMap::new();
-
         graph.insert(
             InputId::Rewind,
             InputNode {
@@ -218,6 +219,9 @@ pub struct AppState {
     pub scale: String,
     pub style: String,
     pub bpm: String,
+    pub progress: f32,
+    pub elapsed_play_time: f32,
+    pub start_time: Option<Instant>,
     pub length: String,
     pub seed: String,
     pub track_id: String,
@@ -276,11 +280,14 @@ impl Default for AppState {
             length: "1 min".to_string(),
             seed: "".to_string(),
             track_id: "".to_string(),
+            elapsed_play_time: 0.0,
+            start_time: Some(Instant::now()),
             input_mode: InputMode::Navigation,
             popup_list_state,
             scales,
             styles,
             lengths,
+            progress: 0.0,
         }
     }
 }
@@ -457,6 +464,15 @@ impl<B: Backend> Tui<B> {
             f.render_widget(track_info, now_playing_layout[0]);
 
             // Progress bar
+            let length = self
+                .state
+                .length
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .parse::<f32>()
+                .unwrap();
+
             let progress_bar = Paragraph::new("██████████████████░░░░░░░░░░░░░░░░░░░░   [50%]")
                 .alignment(Alignment::Center);
             f.render_widget(progress_bar, now_playing_layout[2]);
@@ -838,15 +854,21 @@ impl<B: Backend> Tui<B> {
         Ok(())
     }
 
-    pub fn toggle_play(&self) {
+    pub fn toggle_play(&self) -> (f32, Option<Instant>) {
         let currently_playing = IS_PLAYING.load(Ordering::SeqCst);
-        println!("UI: before - IS_PLAYING = {}", currently_playing);
+        let mut elapsed_play_time: f32 = 0.0;
+        let mut start_time: Option<Instant> = None;
+        // println!("UI: before - IS_PLAYING = {}", currently_playing);
 
         if currently_playing {
             // Music is playing, so pause it
             if pause_music().is_ok() {
                 IS_PLAYING.store(false, Ordering::SeqCst);
-                println!("Music paused");
+                if let Some(start_time) = self.state.start_time {
+                    let elapsed = start_time.elapsed().as_secs_f32();
+                    elapsed_play_time += elapsed;
+                }
+                // println!("Music paused");
             }
         } else {
             // Check if a sender exists without holding the lock during resume_music()
@@ -858,18 +880,23 @@ impl<B: Backend> Tui<B> {
             if should_resume {
                 if resume_music().is_ok() {
                     IS_PLAYING.store(true, Ordering::SeqCst);
-                    println!("Music resumed");
+                    start_time = Some(Instant::now()); // Resume timing
+                                                       // println!("Music resumed");
                 }
             } else {
                 start_music_in_thread(self.state.clone()).unwrap();
                 IS_PLAYING.store(true, Ordering::SeqCst);
-                println!("Music started");
+                elapsed_play_time = 0.0; // Reset time tracking for a new song
+                start_time = Some(Instant::now());
+                // println!("Music started");
             }
         }
-        println!(
-            "UI: after - IS_PLAYING = {}",
-            IS_PLAYING.load(Ordering::SeqCst)
-        );
+        // println!(
+        //     "UI: after - IS_PLAYING = {}",
+        //     IS_PLAYING.load(Ordering::SeqCst)
+        // );
+
+        (elapsed_play_time, start_time)
     }
 
     // Method to handle user input
@@ -1109,7 +1136,8 @@ impl<B: Backend> Tui<B> {
                             }
                             InputId::PlayPause => {
                                 // Handle play/pause toggle
-                                Tui::<B>::toggle_play(&self);
+                                (self.state.elapsed_play_time, self.state.start_time) =
+                                    self::Tui::<B>::toggle_play(self);
                             }
                             InputId::Skip => {
                                 // Fast forward (Skip to the next song)
