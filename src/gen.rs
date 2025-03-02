@@ -99,14 +99,6 @@ pub fn pause_music() -> Result<(), &'static str> {
 pub fn resume_music() -> Result<(), &'static str> {
     let sender = get_music_sender().lock().unwrap();
 
-    if sender.is_some() {
-        println!("UI: Global sender exists. Will attempt resume.");
-        // Resume branch
-    } else {
-        println!("UI: No global sender. Starting new playback.");
-        // Start new playback branch
-    }
-
     if let Some(tx) = &*sender {
         println!("Sending Resume command");
         tx.send(MusicControl::Resume)

@@ -1,4 +1,4 @@
-use crate::gen::{get_music_sender, pause_music, resume_music, start_music_in_thread};
+use crate::gen::{get_music_sender, pause_music, resume_music, start_music_in_thread, stop_music};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
@@ -840,6 +840,40 @@ impl<B: Backend> Tui<B> {
         Ok(())
     }
 
+    pub fn toggle_play() {
+        let currently_playing = IS_PLAYING.load(Ordering::SeqCst);
+        println!("UI: before - IS_PLAYING = {}", currently_playing);
+
+        if currently_playing {
+            // Music is playing, so pause it
+            if pause_music().is_ok() {
+                IS_PLAYING.store(false, Ordering::SeqCst);
+                println!("Music paused");
+            }
+        } else {
+            // Check if a sender exists without holding the lock during resume_music()
+            let should_resume = {
+                let sender = get_music_sender().lock().unwrap();
+                sender.is_some()
+            };
+
+            if should_resume {
+                if resume_music().is_ok() {
+                    IS_PLAYING.store(true, Ordering::SeqCst);
+                    println!("Music resumed");
+                }
+            } else {
+                start_music_in_thread().unwrap();
+                IS_PLAYING.store(true, Ordering::SeqCst);
+                println!("Music started");
+            }
+        }
+        println!(
+            "UI: after - IS_PLAYING = {}",
+            IS_PLAYING.load(Ordering::SeqCst)
+        );
+    }
+
     // Method to handle user input
     pub fn handle_input(&mut self) -> std::io::Result<bool> {
         match event::read()? {
@@ -1073,43 +1107,14 @@ impl<B: Backend> Tui<B> {
                                 // In a real app, this would load a track by ID
                             }
                             InputId::Rewind => {
-                                // Handle rewind action
+                                // Rewind: reset the current song to the beginning.
                             }
                             InputId::PlayPause => {
-                                let currently_playing = IS_PLAYING.load(Ordering::SeqCst);
-                                println!("UI: before - IS_PLAYING = {}", currently_playing);
-
-                                if currently_playing {
-                                    // Music is playing, so pause it
-                                    if pause_music().is_ok() {
-                                        IS_PLAYING.store(false, Ordering::SeqCst);
-                                        println!("Music paused");
-                                    }
-                                } else {
-                                    // Check if a sender exists without holding the lock during resume_music()
-                                    let should_resume = {
-                                        let sender = get_music_sender().lock().unwrap();
-                                        sender.is_some()
-                                    };
-
-                                    if should_resume {
-                                        if resume_music().is_ok() {
-                                            IS_PLAYING.store(true, Ordering::SeqCst);
-                                            println!("Music resumed");
-                                        }
-                                    } else {
-                                        start_music_in_thread().unwrap();
-                                        IS_PLAYING.store(true, Ordering::SeqCst);
-                                        println!("Music started");
-                                    }
-                                }
-                                println!(
-                                    "UI: after - IS_PLAYING = {}",
-                                    IS_PLAYING.load(Ordering::SeqCst)
-                                );
+                                // Handle play/pause toggle
+                                Tui::<B>::toggle_play();
                             }
                             InputId::Skip => {
-                                // Handle skip action
+                                // Fast forward (Skip to the next song)
                             }
                             InputId::Loop => {
                                 // Handle loop toggle action
@@ -1148,7 +1153,9 @@ impl<B: Backend> Tui<B> {
                             InputId::TrackID,
                             InputId::Load,
                         ];
-                        if let Some(current_pos) = tab_order.iter().position(|&id| id == self.current_focus) {
+                        if let Some(current_pos) =
+                            tab_order.iter().position(|&id| id == self.current_focus)
+                        {
                             let prev_pos = if current_pos == 0 {
                                 tab_order.len() - 1
                             } else {
@@ -1158,7 +1165,7 @@ impl<B: Backend> Tui<B> {
                         } else {
                             self.current_focus = tab_order[tab_order.len() - 1];
                         }
-                    },
+                    }
                     (InputMode::Navigation, KeyCode::Tab) => {
                         let tab_order = [
                             InputId::Rewind,
@@ -1174,7 +1181,9 @@ impl<B: Backend> Tui<B> {
                             InputId::TrackID,
                             InputId::Load,
                         ];
-                        if let Some(current_pos) = tab_order.iter().position(|&id| id == self.current_focus) {
+                        if let Some(current_pos) =
+                            tab_order.iter().position(|&id| id == self.current_focus)
+                        {
                             let next_pos = (current_pos + 1) % tab_order.len();
                             self.current_focus = tab_order[next_pos];
                         } else {
