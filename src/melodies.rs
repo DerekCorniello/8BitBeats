@@ -279,7 +279,6 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
 
     match style {
         "blues" => {
-            println!("Creating blues melody in {:?}", root_pitch);
             // Blues uses pentatonic minor scale typically
             generate_melody_samples(
                 root_pitch,
@@ -292,7 +291,6 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
             )
         }
         "pop" => {
-            println!("Creating pop melody in {:?}", root_pitch);
             // Pop often uses major scale
             generate_melody_samples(
                 root_pitch,
@@ -305,7 +303,6 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
             )
         }
         "jazz" => {
-            println!("Creating jazz melody in {:?}", root_pitch);
             // Jazz often uses Dorian or Mixolydian scales
             let jazz_mode = if rand::rng().random::<bool>() {
                 Mode::Dorian
@@ -324,7 +321,6 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
             )
         }
         _ => {
-            println!("Creating default melody in {:?}", root_pitch);
             // Default to major scale
             generate_melody_samples(
                 root_pitch,

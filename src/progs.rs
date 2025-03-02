@@ -87,13 +87,6 @@ pub fn generate_chord_samples(
     // Get the actual notes in the chord
     let chord_notes = chord.notes();
 
-    // Print information about the chord
-    println!(
-        "Generating chord: {:?} {:?} {:?}",
-        root_note, chord_quality, chord_type
-    );
-    println!("Chord notes: {:?}", chord_notes);
-
     // Calculate the frequency for each note in the chord
     let note_frequencies: Vec<f32> = chord_notes.iter().map(note_to_frequency).collect();
 
@@ -171,7 +164,6 @@ pub fn get_progression(prog_name: String, root: u8, chord_duration: f32) -> Vec<
 
     match prog_name.as_str() {
         "blues" => {
-            println!("Creating blues progression in {:?}", get_pitch(root));
             vec![
                 // I chord
                 generate_chord_samples(
@@ -208,7 +200,6 @@ pub fn get_progression(prog_name: String, root: u8, chord_duration: f32) -> Vec<
             ]
         }
         "pop" => {
-            println!("Creating pop progression in {:?}", get_pitch(root));
             vec![
                 // I chord
                 generate_chord_samples(
@@ -245,7 +236,6 @@ pub fn get_progression(prog_name: String, root: u8, chord_duration: f32) -> Vec<
             ]
         }
         "jazz" => {
-            println!("Creating jazz ii-V-I progression in {:?}", get_pitch(root));
             vec![
                 // ii chord (minor 7th)
                 generate_chord_samples(
@@ -275,7 +265,6 @@ pub fn get_progression(prog_name: String, root: u8, chord_duration: f32) -> Vec<
         }
         // Default to a simple I-IV progression if the name doesn't match
         _ => {
-            println!("Using default I-IV progression in {:?}", get_pitch(root));
             vec![
                 generate_chord_samples(
                     get_pitch(root),
