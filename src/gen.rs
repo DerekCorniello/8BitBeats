@@ -20,7 +20,6 @@ fn play_progression(prog_name: String, root_note: u8, chord_duration: f32) -> Ve
 }
 
 pub fn play_music() {
-    // Audio settings
     const SAMPLE_RATE: u32 = 44100; // CD-quality audio (44.1 kHz)
     let root_note = 0;
     let bpm = 120.0;
