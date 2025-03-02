@@ -62,6 +62,8 @@ fn reset_terminal() {
     }
 }
 
+fn play_music() {}
+
 fn main() {
     // Audio settings
     let sample_rate = 44100; // CD-quality audio (44.1 kHz)
@@ -243,4 +245,3 @@ fn main() {
 
     println!("Playback ended.");
 }
-
