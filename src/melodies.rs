@@ -86,13 +86,6 @@ pub fn generate_melody_samples(
     .unwrap();
 
     let scale_notes = scale.notes();
-
-    println!(
-        "Generating melody in {:?} {:?} {:?}",
-        root_note, scale_type, mode
-    );
-    println!("Scale notes: {:?}", scale_notes);
-
     let mut durations: Vec<f32> = vec![];
     let mut dur_sum = 0.0;
     let quarter_note_duration = 60.0 / bpm as f32; // Duration of one quarter note in seconds

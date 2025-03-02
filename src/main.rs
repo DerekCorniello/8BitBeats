@@ -1,5 +1,4 @@
 mod melodies;
-mod test;
 mod tui;
 use crate::tui::Tui;
 
