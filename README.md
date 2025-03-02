@@ -48,7 +48,10 @@
 ├────────────────────────────────────────────────────────────────────────────┤
 │                           ♬ Create New Track                               │
 │                                                                            │
-│           Scale: [ Major    ▼] BPM: [120   ] Length: [30 sec  ]            │
+│           Scale: [ Major    ▼] Style: [ 8-bit    ▼]                        │
+│                                                                            │
+│            BPM: [120   ] Length: [30 sec  ]                                │
+│                                                                            │
 │                        Seed (optional): [______]                           │
 │                                                                            │
 │                              [♫ Generate]                                  │

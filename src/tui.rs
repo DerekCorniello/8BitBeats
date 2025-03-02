@@ -6,9 +6,10 @@ use crossterm::{
 use ratatui::{
     backend::Backend,
     layout::{Alignment, Constraint, Direction as LayoutDirection, Layout, Rect},
+    prelude::Position,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, StatefulWidget},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Terminal,
 };
 
@@ -22,7 +23,7 @@ enum InputId {
     Skip,
     Loop,
     Scale,
-    Style,  // New parameter
+    Style, // New parameter
     Bpm,
     Length,
     Seed,
@@ -67,7 +68,7 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
                 neighbors: HashMap::from([
                     (Direction::Right, InputId::Skip),
                     (Direction::Left, InputId::Rewind),
-                    (Direction::Down, InputId::Style),
+                    (Direction::Down, InputId::Scale),
                 ]),
             },
         );
@@ -78,7 +79,7 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
                 neighbors: HashMap::from([
                     (Direction::Right, InputId::Loop),
                     (Direction::Left, InputId::PlayPause),
-                    (Direction::Down, InputId::Bpm),
+                    (Direction::Down, InputId::Style),
                 ]),
             },
         );
@@ -89,7 +90,7 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
                 neighbors: HashMap::from([
                     (Direction::Right, InputId::Rewind),
                     (Direction::Left, InputId::Skip),
-                    (Direction::Down, InputId::Length),
+                    (Direction::Down, InputId::Style),
                 ]),
             },
         );
@@ -100,7 +101,8 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
                 neighbors: HashMap::from([
                     (Direction::Up, InputId::Rewind),
                     (Direction::Right, InputId::Style),
-                    (Direction::Down, InputId::Seed),
+                    (Direction::Left, InputId::Style),
+                    (Direction::Down, InputId::Bpm),
                 ]),
             },
         );
@@ -109,10 +111,10 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
             InputId::Style,
             InputNode {
                 neighbors: HashMap::from([
-                    (Direction::Up, InputId::PlayPause),
-                    (Direction::Right, InputId::Bpm),
+                    (Direction::Up, InputId::Loop),
+                    (Direction::Right, InputId::Scale),
                     (Direction::Left, InputId::Scale),
-                    (Direction::Down, InputId::Seed),
+                    (Direction::Down, InputId::Length),
                 ]),
             },
         );
@@ -123,7 +125,7 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
                 neighbors: HashMap::from([
                     (Direction::Up, InputId::Skip),
                     (Direction::Right, InputId::Length),
-                    (Direction::Left, InputId::Style),
+                    (Direction::Left, InputId::Length),
                     (Direction::Down, InputId::Seed),
                 ]),
             },
@@ -133,8 +135,8 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
             InputId::Length,
             InputNode {
                 neighbors: HashMap::from([
-                    (Direction::Up, InputId::Loop),
-                    (Direction::Right, InputId::Scale),
+                    (Direction::Up, InputId::Style),
+                    (Direction::Right, InputId:: Bpm),
                     (Direction::Left, InputId::Bpm),
                     (Direction::Down, InputId::Seed),
                 ]),
@@ -167,6 +169,7 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
                 neighbors: HashMap::from([
                     (Direction::Up, InputId::Generate),
                     (Direction::Right, InputId::Load),
+                    (Direction::Left, InputId::Load),
                 ]),
             },
         );
@@ -177,6 +180,7 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
                 neighbors: HashMap::from([
                     (Direction::Up, InputId::Generate),
                     (Direction::Left, InputId::TrackID),
+                    (Direction::Right, InputId::TrackID),
                 ]),
             },
         );
@@ -194,11 +198,11 @@ fn next_focus(current: InputId, direction: Direction) -> InputId {
 // Input mode to determine how to handle user input
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InputMode {
-    Navigation,   // For navigating between fields
-    Editing,      // For editing a text field
-    ScalePopup,   // When the scale popup is active
-    StylePopup,   // When the style popup is active
-    LengthPopup,  // When the length popup is active
+    Navigation,  // For navigating between fields
+    Editing,     // For editing a text field
+    ScalePopup,  // When the scale popup is active
+    StylePopup,  // When the style popup is active
+    LengthPopup, // When the length popup is active
 }
 
 // AppState to store application state
@@ -235,7 +239,7 @@ impl Default for AppState {
             "A#".to_string(),
             "B".to_string(),
         ];
-        
+
         // Create list of musical styles
         let styles = vec![
             "Random".to_string(),
@@ -244,7 +248,7 @@ impl Default for AppState {
             "Pop".to_string(),
             "Basic".to_string(),
         ];
-        
+
         // Create list of track lengths
         let lengths = vec![
             "5 sec".to_string(),
@@ -256,10 +260,10 @@ impl Default for AppState {
             "30 min".to_string(),
             "1 Hour".to_string(),
         ];
-        
+
         let mut popup_list_state = ListState::default();
         popup_list_state.select(Some(0)); // Select the first item by default
-        
+
         Self {
             scale: "C".to_string(),
             style: "8-bit".to_string(),
@@ -319,7 +323,7 @@ impl<B: Backend> Tui<B> {
             static MIN_HEIGHT: u16 = 25;
 
             // Get the full area of the terminal
-            let size = f.size();
+            let size = f.area();
             let terminal_width = size.width;
             let terminal_height = size.height;
 
@@ -407,7 +411,7 @@ impl<B: Backend> Tui<B> {
             let now_playing_area = panel_layout[0];
             let create_track_area = panel_layout[2];
             let load_track_area = panel_layout[4];
-            
+
             // Create and render the Now Playing panel
             let now_playing_block = Block::default().title("Now Playing").borders(Borders::ALL);
 
@@ -449,34 +453,58 @@ impl<B: Backend> Tui<B> {
                 .split(now_playing_layout[4]);
 
             // Render playback controls
-            let rewind_style = if self.current_focus == InputId::Rewind && self.state.input_mode == InputMode::Navigation {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            let rewind_style = if self.current_focus == InputId::Rewind
+                && self.state.input_mode == InputMode::Navigation
+            {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
 
-            let play_pause_style = if self.current_focus == InputId::PlayPause && self.state.input_mode == InputMode::Navigation {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            let play_pause_style = if self.current_focus == InputId::PlayPause
+                && self.state.input_mode == InputMode::Navigation
+            {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
 
-            let skip_style = if self.current_focus == InputId::Skip && self.state.input_mode == InputMode::Navigation {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            let skip_style = if self.current_focus == InputId::Skip
+                && self.state.input_mode == InputMode::Navigation
+            {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
 
-            let loop_style = if self.current_focus == InputId::Loop && self.state.input_mode == InputMode::Navigation {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            let loop_style = if self.current_focus == InputId::Loop
+                && self.state.input_mode == InputMode::Navigation
+            {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
 
-            let rewind = Paragraph::new("[<< Rewind]").style(rewind_style).alignment(Alignment::Center);
-            let play_pause = Paragraph::new("[▶ Play/Pause]").style(play_pause_style).alignment(Alignment::Center);
-            let skip = Paragraph::new("[>> Skip]").style(skip_style).alignment(Alignment::Center);
-            let loop_control = Paragraph::new("[↻ Enable Loop]").style(loop_style).alignment(Alignment::Center);
+            let rewind = Paragraph::new("[<< Rewind]")
+                .style(rewind_style)
+                .alignment(Alignment::Center);
+            let play_pause = Paragraph::new("[▶ Play/Pause]")
+                .style(play_pause_style)
+                .alignment(Alignment::Center);
+            let skip = Paragraph::new("[>> Skip]")
+                .style(skip_style)
+                .alignment(Alignment::Center);
+            let loop_control = Paragraph::new("[↻ Enable Loop]")
+                .style(loop_style)
+                .alignment(Alignment::Center);
 
             f.render_widget(rewind, control_layout[0]);
             f.render_widget(play_pause, control_layout[1]);
@@ -498,6 +526,8 @@ impl<B: Backend> Tui<B> {
                     Constraint::Length(2), // Empty space
                     Constraint::Length(1), // Parameters row
                     Constraint::Length(2), // Empty space
+                    Constraint::Length(1), // Parameters row
+                    Constraint::Length(2), // Empty space
                     Constraint::Length(1), // Seed row
                     Constraint::Length(2), // Empty space
                     Constraint::Length(1), // Generate button
@@ -505,7 +535,7 @@ impl<B: Backend> Tui<B> {
                 .split(inner_create_track);
 
             // Parameters layout (Scale, Style, BPM, Length)
-            let params_layout = Layout::default()
+            let params_layout_top = Layout::default()
                 .direction(LayoutDirection::Horizontal)
                 .constraints([
                     Constraint::Ratio(1, 4),
@@ -515,6 +545,16 @@ impl<B: Backend> Tui<B> {
                 ])
                 .split(create_track_layout[1]);
 
+            let params_layout_bottom = Layout::default()
+                .direction(LayoutDirection::Horizontal)
+                .constraints([
+                    Constraint::Ratio(1, 4),
+                    Constraint::Ratio(1, 4),
+                    Constraint::Ratio(1, 4),
+                    Constraint::Ratio(1, 4),
+                ])
+                .split(create_track_layout[3]);
+
             // Style each parameter based on focus and input mode
             let scale_style = if self.current_focus == InputId::Scale {
                 if self.state.input_mode == InputMode::Navigation {
@@ -522,7 +562,9 @@ impl<B: Backend> Tui<B> {
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
                 }
             } else {
                 Style::default()
@@ -534,7 +576,9 @@ impl<B: Backend> Tui<B> {
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
                 }
             } else {
                 Style::default()
@@ -546,7 +590,9 @@ impl<B: Backend> Tui<B> {
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
                 }
             } else {
                 Style::default()
@@ -558,7 +604,9 @@ impl<B: Backend> Tui<B> {
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
                 }
             } else {
                 Style::default()
@@ -578,10 +626,10 @@ impl<B: Backend> Tui<B> {
                 .style(length_style)
                 .alignment(Alignment::Center);
 
-            f.render_widget(scale, params_layout[0]);
-            f.render_widget(style_param, params_layout[1]);
-            f.render_widget(bpm, params_layout[2]);
-            f.render_widget(length, params_layout[3]);
+            f.render_widget(scale, params_layout_top[0]);
+            f.render_widget(style_param, params_layout_top[3]);
+            f.render_widget(bpm, params_layout_bottom[0]);
+            f.render_widget(length, params_layout_bottom[3]);
 
             let seed_style = if self.current_focus == InputId::Seed {
                 if self.state.input_mode == InputMode::Navigation {
@@ -589,7 +637,9 @@ impl<B: Backend> Tui<B> {
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
                 }
             } else {
                 Style::default()
@@ -605,7 +655,7 @@ impl<B: Backend> Tui<B> {
             let seed = Paragraph::new(seed_display)
                 .style(seed_style)
                 .alignment(Alignment::Center);
-            f.render_widget(seed, create_track_layout[3]);
+            f.render_widget(seed, create_track_layout[5]);
 
             // Generate button
             let generate_style = if self.current_focus == InputId::Generate
@@ -621,7 +671,7 @@ impl<B: Backend> Tui<B> {
             let generate = Paragraph::new("[♫ Generate]")
                 .style(generate_style)
                 .alignment(Alignment::Center);
-            f.render_widget(generate, create_track_layout[5]);
+            f.render_widget(generate, create_track_layout[7]);
 
             // Create and render the Load Track panel
             let load_track_block = Block::default()
@@ -656,7 +706,9 @@ impl<B: Backend> Tui<B> {
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
                 }
             } else {
                 Style::default()
@@ -691,25 +743,26 @@ impl<B: Backend> Tui<B> {
             f.render_widget(load, track_id_layout[1]);
 
             // Draw popup if one is active
-            if self.state.input_mode == InputMode::ScalePopup || 
-               self.state.input_mode == InputMode::StylePopup ||
-               self.state.input_mode == InputMode::LengthPopup {
+            if self.state.input_mode == InputMode::ScalePopup
+                || self.state.input_mode == InputMode::StylePopup
+                || self.state.input_mode == InputMode::LengthPopup
+            {
                 // Calculate the popup dimensions and position
                 let popup_width = 25;
                 let popup_height = 15;
                 let popup_x = (terminal_width - popup_width) / 2;
                 let popup_y = (terminal_height - popup_height) / 2;
-                
+
                 let popup_area = Rect {
                     x: popup_x,
                     y: popup_y,
                     width: popup_width,
                     height: popup_height,
                 };
-                
+
                 // Clear the area under the popup
                 f.render_widget(Clear, popup_area);
-                
+
                 // Create a block for the popup with appropriate title
                 let title = match self.state.input_mode {
                     InputMode::ScalePopup => "Select Scale",
@@ -717,35 +770,48 @@ impl<B: Backend> Tui<B> {
                     InputMode::LengthPopup => "Select Length",
                     _ => "",
                 };
-                
+
                 let popup_block = Block::default()
                     .title(title)
                     .borders(Borders::ALL)
                     .style(Style::default().bg(Color::DarkGray));
-                
+
                 f.render_widget(popup_block.clone(), popup_area);
-                
+
                 // Create the inner area for the list
                 let inner_popup_area = popup_block.inner(popup_area);
-                
+
                 // Get the appropriate items based on the active popup
                 let items: Vec<ListItem> = match self.state.input_mode {
-                    InputMode::ScalePopup => self.state.scales.iter().map(|s| ListItem::new(s.clone())).collect(),
-                    InputMode::StylePopup => self.state.styles.iter().map(|s| ListItem::new(s.clone())).collect(),
-                    InputMode::LengthPopup => self.state.lengths.iter().map(|s| ListItem::new(s.clone())).collect(),
+                    InputMode::ScalePopup => self
+                        .state
+                        .scales
+                        .iter()
+                        .map(|s| ListItem::new(s.clone()))
+                        .collect(),
+                    InputMode::StylePopup => self
+                        .state
+                        .styles
+                        .iter()
+                        .map(|s| ListItem::new(s.clone()))
+                        .collect(),
+                    InputMode::LengthPopup => self
+                        .state
+                        .lengths
+                        .iter()
+                        .map(|s| ListItem::new(s.clone()))
+                        .collect(),
                     _ => vec![],
                 };
-                
+
                 // Create the list widget
-                let list = List::new(items)
-                    .block(Block::default())
-                    .highlight_style(
-                        Style::default()
-                            .bg(Color::Yellow)
-                            .fg(Color::Black)
-                            .add_modifier(Modifier::BOLD),
-                    );
-                
+                let list = List::new(items).block(Block::default()).highlight_style(
+                    Style::default()
+                        .bg(Color::Yellow)
+                        .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                );
+
                 // Render the list with state
                 f.render_stateful_widget(list, inner_popup_area, &mut self.state.popup_list_state);
             }
@@ -755,21 +821,21 @@ impl<B: Backend> Tui<B> {
                 match self.current_focus {
                     InputId::Bpm => {
                         // Position cursor after the text in the BPM field
-                        let x = params_layout[2].x + 6 + self.state.bpm.len() as u16;
-                        let y = params_layout[2].y;
-                        f.set_cursor(x, y);
+                        let x = params_layout_top[2].x + 6 + self.state.bpm.len() as u16;
+                        let y = params_layout_top[2].y;
+                        f.set_cursor_position(Position { x, y });
                     }
                     InputId::Seed => {
                         // Position cursor after the text in the seed field
-                        let x = create_track_layout[3].x + 17 + self.state.seed.len() as u16;
-                        let y = create_track_layout[3].y;
-                        f.set_cursor(x, y);
+                        let x = create_track_layout[4].x + 17 + self.state.seed.len() as u16;
+                        let y = create_track_layout[4].y;
+                        f.set_cursor_position(Position { x, y });
                     }
                     InputId::TrackID => {
                         // Position cursor after the text in the track ID field
                         let x = track_id_layout[0].x + 11 + self.state.track_id.len() as u16;
                         let y = track_id_layout[0].y;
-                        f.set_cursor(x, y);
+                        f.set_cursor_position(Position { x, y });
                     }
                     _ => {}
                 }
@@ -779,10 +845,11 @@ impl<B: Backend> Tui<B> {
     }
     // Method to handle user input
     pub fn handle_input(&mut self) -> std::io::Result<bool> {
-
         match event::read()? {
             // Handle key events
-            Event::Key(KeyEvent { code, modifiers, .. }) => {
+            Event::Key(KeyEvent {
+                code, modifiers, ..
+            }) => {
                 match (self.state.input_mode, code) {
                     // In Scale Popup mode
                     (InputMode::ScalePopup, KeyCode::Esc) => {
@@ -796,7 +863,8 @@ impl<B: Backend> Tui<B> {
                         }
                         self.state.input_mode = InputMode::Navigation;
                     }
-                    (InputMode::ScalePopup, KeyCode::Up) | (InputMode::ScalePopup, KeyCode::Char('k')) => {
+                    (InputMode::ScalePopup, KeyCode::Up)
+                    | (InputMode::ScalePopup, KeyCode::Char('k')) => {
                         // Navigate up in the scale list
                         let selected = self.state.popup_list_state.selected().unwrap_or(0);
                         let new_selection = if selected > 0 {
@@ -806,7 +874,8 @@ impl<B: Backend> Tui<B> {
                         };
                         self.state.popup_list_state.select(Some(new_selection));
                     }
-                    (InputMode::ScalePopup, KeyCode::Down) | (InputMode::ScalePopup, KeyCode::Char('j')) => {
+                    (InputMode::ScalePopup, KeyCode::Down)
+                    | (InputMode::ScalePopup, KeyCode::Char('j')) => {
                         // Navigate down in the scale list
                         let selected = self.state.popup_list_state.selected().unwrap_or(0);
                         let new_selection = if selected < self.state.scales.len() - 1 {
@@ -816,7 +885,7 @@ impl<B: Backend> Tui<B> {
                         };
                         self.state.popup_list_state.select(Some(new_selection));
                     }
-                    
+
                     // In Style Popup mode
                     (InputMode::StylePopup, KeyCode::Esc) => {
                         // Exit popup mode
@@ -829,7 +898,8 @@ impl<B: Backend> Tui<B> {
                         }
                         self.state.input_mode = InputMode::Navigation;
                     }
-                    (InputMode::StylePopup, KeyCode::Up) | (InputMode::StylePopup, KeyCode::Char('k')) => {
+                    (InputMode::StylePopup, KeyCode::Up)
+                    | (InputMode::StylePopup, KeyCode::Char('k')) => {
                         // Navigate up in the style list
                         let selected = self.state.popup_list_state.selected().unwrap_or(0);
                         let new_selection = if selected > 0 {
@@ -839,7 +909,8 @@ impl<B: Backend> Tui<B> {
                         };
                         self.state.popup_list_state.select(Some(new_selection));
                     }
-                    (InputMode::StylePopup, KeyCode::Down) | (InputMode::StylePopup, KeyCode::Char('j')) => {
+                    (InputMode::StylePopup, KeyCode::Down)
+                    | (InputMode::StylePopup, KeyCode::Char('j')) => {
                         // Navigate down in the style list
                         let selected = self.state.popup_list_state.selected().unwrap_or(0);
                         let new_selection = if selected < self.state.styles.len() - 1 {
@@ -849,7 +920,7 @@ impl<B: Backend> Tui<B> {
                         };
                         self.state.popup_list_state.select(Some(new_selection));
                     }
-                    
+
                     // In Length Popup mode
                     (InputMode::LengthPopup, KeyCode::Esc) => {
                         // Exit popup mode
@@ -862,7 +933,8 @@ impl<B: Backend> Tui<B> {
                         }
                         self.state.input_mode = InputMode::Navigation;
                     }
-                    (InputMode::LengthPopup, KeyCode::Up) | (InputMode::LengthPopup, KeyCode::Char('k')) => {
+                    (InputMode::LengthPopup, KeyCode::Up)
+                    | (InputMode::LengthPopup, KeyCode::Char('k')) => {
                         // Navigate up in the length list
                         let selected = self.state.popup_list_state.selected().unwrap_or(0);
                         let new_selection = if selected > 0 {
@@ -872,7 +944,8 @@ impl<B: Backend> Tui<B> {
                         };
                         self.state.popup_list_state.select(Some(new_selection));
                     }
-                    (InputMode::LengthPopup, KeyCode::Down) | (InputMode::LengthPopup, KeyCode::Char('j')) => {
+                    (InputMode::LengthPopup, KeyCode::Down)
+                    | (InputMode::LengthPopup, KeyCode::Char('j')) => {
                         // Navigate down in the length list
                         let selected = self.state.popup_list_state.selected().unwrap_or(0);
                         let new_selection = if selected < self.state.lengths.len() - 1 {
@@ -939,9 +1012,10 @@ impl<B: Backend> Tui<B> {
                             _ => {}
                         }
                     }
-                    
+
                     // In Navigation mode
-                    (InputMode::Navigation, KeyCode::Char('q')) | (InputMode::Navigation, KeyCode::Esc) => {
+                    (InputMode::Navigation, KeyCode::Char('q'))
+                    | (InputMode::Navigation, KeyCode::Esc) => {
                         // Quit the application with q or Esc
                         return Ok(false);
                     }
@@ -952,7 +1026,12 @@ impl<B: Backend> Tui<B> {
                                 // Open scale popup
                                 self.state.input_mode = InputMode::ScalePopup;
                                 // Find the index of the current scale to select it in the popup
-                                if let Some(index) = self.state.scales.iter().position(|s| s == &self.state.scale) {
+                                if let Some(index) = self
+                                    .state
+                                    .scales
+                                    .iter()
+                                    .position(|s| s == &self.state.scale)
+                                {
                                     self.state.popup_list_state.select(Some(index));
                                 }
                             }
@@ -960,7 +1039,12 @@ impl<B: Backend> Tui<B> {
                                 // Open style popup
                                 self.state.input_mode = InputMode::StylePopup;
                                 // Find the index of the current style to select it in the popup
-                                if let Some(index) = self.state.styles.iter().position(|s| s == &self.state.style) {
+                                if let Some(index) = self
+                                    .state
+                                    .styles
+                                    .iter()
+                                    .position(|s| s == &self.state.style)
+                                {
                                     self.state.popup_list_state.select(Some(index));
                                 }
                             }
@@ -968,7 +1052,12 @@ impl<B: Backend> Tui<B> {
                                 // Open length popup
                                 self.state.input_mode = InputMode::LengthPopup;
                                 // Find the index of the current length to select it in the popup
-                                if let Some(index) = self.state.lengths.iter().position(|s| s == &self.state.length) {
+                                if let Some(index) = self
+                                    .state
+                                    .lengths
+                                    .iter()
+                                    .position(|s| s == &self.state.length)
+                                {
                                     self.state.popup_list_state.select(Some(index));
                                 }
                             }
@@ -1019,22 +1108,24 @@ impl<B: Backend> Tui<B> {
                     (InputMode::Navigation, KeyCode::Tab) => {
                         // Tab key cycles through the inputs in a predefined order
                         let tab_order = [
-                            InputId::Rewind, 
-                            InputId::PlayPause, 
-                            InputId::Skip, 
+                            InputId::Rewind,
+                            InputId::PlayPause,
+                            InputId::Skip,
                             InputId::Loop,
-                            InputId::Scale, 
+                            InputId::Scale,
                             InputId::Style,
-                            InputId::Bpm, 
-                            InputId::Length, 
+                            InputId::Bpm,
+                            InputId::Length,
                             InputId::Seed,
-                            InputId::Generate, 
-                            InputId::TrackID, 
-                            InputId::Load
+                            InputId::Generate,
+                            InputId::TrackID,
+                            InputId::Load,
                         ];
-                        
+
                         // Find current position in tab order
-                        if let Some(current_pos) = tab_order.iter().position(|&id| id == self.current_focus) {
+                        if let Some(current_pos) =
+                            tab_order.iter().position(|&id| id == self.current_focus)
+                        {
                             // Move to next position, wrapping around if needed
                             let next_pos = (current_pos + 1) % tab_order.len();
                             self.current_focus = tab_order[next_pos];
@@ -1043,29 +1134,34 @@ impl<B: Backend> Tui<B> {
                             self.current_focus = tab_order[0];
                         }
                     }
-                    (InputMode::Navigation, KeyCode::Char('S')) | (InputMode::Navigation, KeyCode::Char('s')) => {
+                    (InputMode::Navigation, KeyCode::Char('S'))
+                    | (InputMode::Navigation, KeyCode::Char('s')) => {
                         // Shortcut to Scale
                         self.current_focus = InputId::Scale;
                     }
-                    (InputMode::Navigation, KeyCode::Char('B')) | (InputMode::Navigation, KeyCode::Char('b')) => {
+                    (InputMode::Navigation, KeyCode::Char('B'))
+                    | (InputMode::Navigation, KeyCode::Char('b')) => {
                         // Shortcut to BPM
                         self.current_focus = InputId::Bpm;
                     }
-                    (InputMode::Navigation, KeyCode::Char('G')) | (InputMode::Navigation, KeyCode::Char('g')) => {
+                    (InputMode::Navigation, KeyCode::Char('G'))
+                    | (InputMode::Navigation, KeyCode::Char('g')) => {
                         // Shortcut to Generate
                         self.current_focus = InputId::Generate;
                     }
-                    (InputMode::Navigation, KeyCode::Char('L')) | (InputMode::Navigation, KeyCode::Char('l')) => {
+                    (InputMode::Navigation, KeyCode::Char('L'))
+                    | (InputMode::Navigation, KeyCode::Char('l')) => {
                         // Shortcut to Load
                         self.current_focus = InputId::Load;
                     }
-                    (InputMode::Navigation, KeyCode::Char('T')) | (InputMode::Navigation, KeyCode::Char('t')) => {
+                    (InputMode::Navigation, KeyCode::Char('T'))
+                    | (InputMode::Navigation, KeyCode::Char('t')) => {
                         // Shortcut to Style
                         self.current_focus = InputId::Style;
                     }
                     _ => {}
                 }
-                
+
                 // Check for Ctrl+C to exit
                 if code == KeyCode::Char('c') && modifiers == KeyModifiers::CONTROL {
                     return Ok(false);
@@ -1075,39 +1171,4 @@ impl<B: Backend> Tui<B> {
         }
         Ok(true)
     }
-
-    // Main run method for the application
-    pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // Set up the terminal
-        self.setup()?;
-        
-        // Main application loop
-        let mut running = true;
-        while running {
-            // Draw the UI
-            self.draw()?;
-            
-            // Handle input (returns false when user wants to quit)
-            running = self.handle_input()?;
-        }
-        
-        // Clean up before exiting
-        self.teardown()?;
-        
-        Ok(())
-    }
-}
-
-// Example usage for this TUI
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create a new terminal backend
-    let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
-    
-    // Create a new TUI instance
-    let mut tui = Tui::new(backend)?;
-    
-    // Run the application
-    tui.run()?;
-    
-    Ok(())
 }
