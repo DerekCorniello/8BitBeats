@@ -1077,23 +1077,24 @@ impl<B: Backend> Tui<B> {
                             }
                         }
                     }
-                    (InputMode::Navigation, KeyCode::Up) => {
+                    (InputMode::Navigation, KeyCode::Up | KeyCode::Char('k')) => {
                         // Navigate up
                         self.current_focus = next_focus(self.current_focus, Direction::Up);
                     }
-                    (InputMode::Navigation, KeyCode::Down) => {
+                    (InputMode::Navigation, KeyCode::Down | KeyCode::Char('j')) => {
                         // Navigate down
                         self.current_focus = next_focus(self.current_focus, Direction::Down);
                     }
-                    (InputMode::Navigation, KeyCode::Left) => {
+                    (InputMode::Navigation, KeyCode::Left | KeyCode::Char('h')) => {
                         // Navigate left
                         self.current_focus = next_focus(self.current_focus, Direction::Left);
                     }
-                    (InputMode::Navigation, KeyCode::Right) => {
+                    (InputMode::Navigation, KeyCode::Right | KeyCode::Char('l')) => {
                         // Navigate right
                         self.current_focus = next_focus(self.current_focus, Direction::Right);
                     }
                     (InputMode::Navigation, KeyCode::Tab) => {
+                        // TODO: IMPLEMENT SHIFT TAB
                         // Tab key cycles through the inputs in a predefined order
                         let tab_order = [
                             InputId::Rewind,
@@ -1121,31 +1122,6 @@ impl<B: Backend> Tui<B> {
                             // If not found (shouldn't happen), default to first
                             self.current_focus = tab_order[0];
                         }
-                    }
-                    (InputMode::Navigation, KeyCode::Char('S'))
-                    | (InputMode::Navigation, KeyCode::Char('s')) => {
-                        // Shortcut to Scale
-                        self.current_focus = InputId::Scale;
-                    }
-                    (InputMode::Navigation, KeyCode::Char('B'))
-                    | (InputMode::Navigation, KeyCode::Char('b')) => {
-                        // Shortcut to BPM
-                        self.current_focus = InputId::Bpm;
-                    }
-                    (InputMode::Navigation, KeyCode::Char('G'))
-                    | (InputMode::Navigation, KeyCode::Char('g')) => {
-                        // Shortcut to Generate
-                        self.current_focus = InputId::Generate;
-                    }
-                    (InputMode::Navigation, KeyCode::Char('L'))
-                    | (InputMode::Navigation, KeyCode::Char('l')) => {
-                        // Shortcut to Load
-                        self.current_focus = InputId::Load;
-                    }
-                    (InputMode::Navigation, KeyCode::Char('T'))
-                    | (InputMode::Navigation, KeyCode::Char('t')) => {
-                        // Shortcut to Style
-                        self.current_focus = InputId::Style;
                     }
                     _ => {}
                 }
