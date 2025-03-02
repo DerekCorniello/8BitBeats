@@ -1,12 +1,15 @@
 use crate::melodies;
 use crate::progs;
+use crate::tui;
 
+use rand::Rng;
 use rodio::buffer::SamplesBuffer;
 use rodio::{OutputStream, Sink, Source};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
+use tui::AppState;
 
 fn play_progression(prog_name: String, root_note: u8, chord_duration: f32) -> Vec<f32> {
     // Get the progression chords
@@ -120,15 +123,46 @@ pub fn stop_music() -> Result<(), &'static str> {
 }
 
 // Function to start music in a separate thread
-pub fn start_music_in_thread() -> Result<(), &'static str> {
+pub fn start_music_in_thread(mut state: AppState) -> Result<(), &'static str> {
     let sender = get_music_sender().lock().unwrap();
     if sender.is_some() {
         return Err("Music is already playing");
     }
     drop(sender);
-
-    thread::spawn(|| {
-        play_music();
+    thread::spawn(move || {
+        // types are enforced on tui
+        // therefore parsing should be fine
+        if state.seed == "" {
+            let mut rng = rand::rng();
+            state.seed = rng.random::<u64>().to_string();
+        }
+        play_music(
+            match state.scale.to_owned().as_str() {
+                "C" => 0,
+                "C#" => 1,
+                "D" => 2,
+                "D#" => 3,
+                "E" => 4,
+                "F" => 5,
+                "F#" => 6,
+                "G" => 7,
+                "G#" => 8,
+                "A" => 9,
+                "A#" => 10,
+                "B" => 11,
+                _ => 0,
+            },
+            str::parse::<u32>(state.bpm.as_str()).unwrap(),
+            state
+                .length
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .parse::<f32>()
+                .unwrap(),
+            state.style.as_str(),
+            str::parse::<u64>(state.seed.as_str()).unwrap(),
+        );
     });
 
     Ok(())
@@ -149,7 +183,7 @@ pub fn play_music(root_note: u8, bpm: u32, duration: f32, style: &str, seed: u64
 
     // Create the player with the receiver
     let mut player = MusicPlayer::new(rx);
-    let melody = melodies::get_melody(style, root_note, duration as u32, bpm as u32, seed);
+    let melody = melodies::get_melody(style, root_note, duration as u32 * 60, bpm, seed);
 
     let chord_sequence = match style {
         "blues" => play_progression(String::from("blues"), root_note, chord_duration),

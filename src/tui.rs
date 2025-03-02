@@ -213,19 +213,19 @@ enum InputMode {
 }
 
 // AppState to store application state
-#[derive(Debug)]
-struct AppState {
-    scale: String,
-    style: String,
-    bpm: String,
-    length: String,
-    seed: String,
-    track_id: String,
-    input_mode: InputMode,
-    popup_list_state: ListState,
-    scales: Vec<String>,
-    styles: Vec<String>,
-    lengths: Vec<String>,
+#[derive(Debug, Clone)]
+pub struct AppState {
+    pub scale: String,
+    pub style: String,
+    pub bpm: String,
+    pub length: String,
+    pub seed: String,
+    pub track_id: String,
+    pub input_mode: InputMode,
+    pub popup_list_state: ListState,
+    pub scales: Vec<String>,
+    pub styles: Vec<String>,
+    pub lengths: Vec<String>,
 }
 
 impl Default for AppState {
@@ -249,23 +249,21 @@ impl Default for AppState {
 
         // Create list of musical styles
         let styles = vec![
-            "Random".to_string(),
-            "Jazz".to_string(),
-            "Blues".to_string(),
-            "Pop".to_string(),
-            "Basic".to_string(),
+            "jazz".to_string(),
+            "blues".to_string(),
+            "pop".to_string(),
+            "basic".to_string(),
         ];
 
         // Create list of track lengths
         let lengths = vec![
-            "5 sec".to_string(),
             "1 min".to_string(),
             "2 min".to_string(),
             "5 min".to_string(),
             "10 min".to_string(),
             "20 min".to_string(),
             "30 min".to_string(),
-            "1 Hour".to_string(),
+            "60 min".to_string(),
         ];
 
         let mut popup_list_state = ListState::default();
@@ -273,9 +271,9 @@ impl Default for AppState {
 
         Self {
             scale: "C".to_string(),
-            style: "8-bit".to_string(),
+            style: "pop".to_string(),
             bpm: "120".to_string(),
-            length: "30 sec".to_string(),
+            length: "1 min".to_string(),
             seed: "".to_string(),
             track_id: "".to_string(),
             input_mode: InputMode::Navigation,
@@ -840,7 +838,7 @@ impl<B: Backend> Tui<B> {
         Ok(())
     }
 
-    pub fn toggle_play() {
+    pub fn toggle_play(&self) {
         let currently_playing = IS_PLAYING.load(Ordering::SeqCst);
         println!("UI: before - IS_PLAYING = {}", currently_playing);
 
@@ -863,7 +861,7 @@ impl<B: Backend> Tui<B> {
                     println!("Music resumed");
                 }
             } else {
-                start_music_in_thread().unwrap();
+                start_music_in_thread(self.state.clone()).unwrap();
                 IS_PLAYING.store(true, Ordering::SeqCst);
                 println!("Music started");
             }
@@ -1111,7 +1109,7 @@ impl<B: Backend> Tui<B> {
                             }
                             InputId::PlayPause => {
                                 // Handle play/pause toggle
-                                Tui::<B>::toggle_play();
+                                Tui::<B>::toggle_play(&self);
                             }
                             InputId::Skip => {
                                 // Fast forward (Skip to the next song)
