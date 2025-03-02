@@ -1,3 +1,4 @@
+use crate::gen::play_music;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
@@ -831,6 +832,12 @@ impl<B: Backend> Tui<B> {
         })?;
         Ok(())
     }
+
+    fn pause_play(&mut self) {
+        todo!("spawn as a process so the terminal can still take inputs");
+        play_music();
+    }
+
     // Method to handle user input
     pub fn handle_input(&mut self) -> std::io::Result<bool> {
         match event::read()? {
