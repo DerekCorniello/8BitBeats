@@ -17,18 +17,8 @@ use ratatui::{
 use std::{
     collections::HashMap,
     io,
-    process::{Child, Command},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex, OnceLock,
-    },
-    thread,
-    time::Duration,
+    sync::{Arc, Mutex, OnceLock},
 };
-
-static MUSIC_THREAD: OnceLock<Arc<Mutex<Option<thread::JoinHandle<()>>>>> = OnceLock::new();
-static MUSIC_RUNNING: AtomicBool = AtomicBool::new(false);
-static MUSIC_PAUSED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 enum InputId {
@@ -306,7 +296,6 @@ impl<B: Backend> Tui<B> {
     pub fn new(backend: B) -> Result<Self, Box<dyn std::error::Error>> {
         let terminal = Terminal::new(backend)?;
         // setup the music process
-        MUSIC_THREAD.set(Arc::new(Mutex::new(None))).unwrap();
         Ok(Self {
             terminal,
             current_focus: InputId::PlayPause,
@@ -848,28 +837,11 @@ impl<B: Backend> Tui<B> {
         Ok(())
     }
 
-    fn pause_music() {
-        MUSIC_PAUSED.store(true, Ordering::SeqCst);
-    }
-
-    fn resume_music() {
-        MUSIC_PAUSED.store(false, Ordering::SeqCst);
-    }
-
-    fn stop_music() {
-        MUSIC_RUNNING.store(false, Ordering::SeqCst);
-
-        if let Some(handle) = MUSIC_THREAD.get().unwrap().lock().unwrap().take() {
-            let _ = handle.join(); // Ensure clean thread exit
-        }
-    }
-
     pub fn pause_play(&mut self) {
-        if MUSIC_PAUSED.load(Ordering::SeqCst) {
-            Tui::<B>::resume_music(); // If paused, resume
-        } else {
-            Tui::<B>::pause_music(); // If playing, pause
-        }
+        // TODO: Spawn a non-blocking thread that can be signaled to
+        // pause and play, as well as be killed if we no longer want
+        // the sound to be active. I want this to run `play_music()`
+        // asynchronously in the background
     }
 
     // Method to handle user input
