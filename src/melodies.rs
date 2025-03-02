@@ -1,5 +1,6 @@
 use dasp_signal::Signal;
-use rand::{prelude::IndexedRandom, Rng};
+use rand::prelude::*;
+use rand_chacha::ChaCha8Rng;
 use rust_music_theory::note::{Note, Notes, PitchClass};
 use rust_music_theory::scale::{Direction, Mode, Scale, ScaleType};
 
@@ -72,8 +73,9 @@ pub fn generate_melody_samples(
     rhythm_pattern: RhythmPattern,
     duration_seconds: u32,
     bpm: u32,
+    seed: u64,
 ) -> Vec<f32> {
-    let mut rng = rand::rng();
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
     const SAMPLE_RATE: f32 = 44100.0;
     // Create scale
     let scale = Scale::new(
@@ -274,7 +276,7 @@ pub fn generate_melody_samples(
 }
 
 /// Generate a melody that fits a specific chord progression style
-pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
+pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32, seed: u64) -> Vec<f32> {
     let root_pitch = semitone_to_pitch(root);
 
     match style {
@@ -288,6 +290,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
                 RhythmPattern::Syncopated, // Blues has syncopated rhythm
                 duration,
                 bpm,
+                seed,
             )
         }
         "pop" => {
@@ -300,6 +303,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
                 RhythmPattern::Medium, // Pop usually has straightforward rhythm
                 duration,
                 bpm,
+                seed,
             )
         }
         "jazz" => {
@@ -318,6 +322,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
                 RhythmPattern::Complex, // Jazz has complex rhythms
                 duration,
                 bpm,
+                seed,
             )
         }
         _ => {
@@ -330,6 +335,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
                 RhythmPattern::Simple,
                 duration,
                 bpm,
+                seed,
             )
         }
     }
@@ -344,6 +350,7 @@ pub fn create_custom_melody(
     rhythm: &str,
     duration: f32,
     bpm: u32,
+    seed: u64,
 ) -> Vec<f32> {
     let root_pitch = semitone_to_pitch(root);
 
@@ -385,5 +392,6 @@ pub fn create_custom_melody(
         rhythm_pattern,
         duration as u32,
         bpm,
+        seed,
     )
 }

@@ -26,8 +26,9 @@ pub fn play_music() {
     let chord_duration = 4.0 * sec_per_beat;
     let duration = 60.0;
     let style = "blues";
+    let seed = 1;
 
-    let melody = melodies::get_melody(style, root_note, duration as u32, bpm as u32);
+    let melody = melodies::get_melody(style, root_note, duration as u32, bpm as u32, seed);
 
     let chord_sequence = match style {
         "blues" => play_progression(String::from("blues"), root_note, chord_duration),
@@ -66,7 +67,6 @@ pub fn play_music() {
 
     // Add the audio to the sink
     audio_sink.append(audio_source);
-
 
     // Continue until the sink is empty or we're told to stop
     while !audio_sink.empty() {
