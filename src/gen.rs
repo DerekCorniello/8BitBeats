@@ -108,7 +108,6 @@ pub fn resume_music() -> Result<(), &'static str> {
     }
 }
 
-
 pub fn stop_music() -> Result<(), &'static str> {
     let sender = get_music_sender().lock().unwrap();
 
@@ -135,15 +134,10 @@ pub fn start_music_in_thread() -> Result<(), &'static str> {
     Ok(())
 }
 
-pub fn play_music() {
+pub fn play_music(root_note: u8, bpm: u32, duration: f32, style: &str, seed: u64) {
     const SAMPLE_RATE: u32 = 44100; // CD-quality audio (44.1 kHz)
-    let root_note = 0;
-    let bpm = 120.0;
-    let sec_per_beat = 60.0 / bpm;
-    let chord_duration = 4.0 * sec_per_beat;
-    let duration = 60.0;
-    let style = "blues";
-    let seed = 1;
+    let sec_per_beat: f32 = 60.0 / bpm as f32;
+    let chord_duration: f32 = 4.0 * sec_per_beat;
 
     let (tx, rx) = mpsc::channel();
 
