@@ -7,7 +7,7 @@ use ratatui::{
     backend::Backend,
     layout::{Alignment, Constraint, Direction as LayoutDirection, Layout, Rect},
     prelude::Position,
-    style::{Color, Modifier, Style},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Terminal,
@@ -23,7 +23,7 @@ enum InputId {
     Skip,
     Loop,
     Scale,
-    Style, // New parameter
+    Style,
     Bpm,
     Length,
     Seed,
@@ -123,7 +123,7 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
             InputId::Bpm,
             InputNode {
                 neighbors: HashMap::from([
-                    (Direction::Up, InputId::Skip),
+                    (Direction::Up, InputId::Scale),
                     (Direction::Right, InputId::Length),
                     (Direction::Left, InputId::Length),
                     (Direction::Down, InputId::Seed),
@@ -136,7 +136,7 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
             InputNode {
                 neighbors: HashMap::from([
                     (Direction::Up, InputId::Style),
-                    (Direction::Right, InputId:: Bpm),
+                    (Direction::Right, InputId::Bpm),
                     (Direction::Left, InputId::Bpm),
                     (Direction::Down, InputId::Seed),
                 ]),
@@ -341,17 +341,27 @@ impl<B: Backend> Tui<B> {
                 return;
             }
 
-            // Create main vertical layout
+            // Calculate the total required height for the app
+            let title_height = 8; // Title section height
+            let content_height = 26; // Content section height (Now Playing + Create New Track + Load Track)
+            let total_app_height = title_height + content_height;
+
+            // Calculate vertical padding to center the app
+            let v_padding = (terminal_height.saturating_sub(total_app_height)) / 2;
+
+            // Create top-level layout with vertical padding
             let main_layout = Layout::default()
                 .direction(LayoutDirection::Vertical)
                 .constraints([
-                    Constraint::Length(8), // Title
-                    Constraint::Min(3),    // Content with min height
+                    Constraint::Length(v_padding),      // Top padding
+                    Constraint::Length(title_height),   // Title
+                    Constraint::Length(content_height), // Content
+                    Constraint::Min(v_padding),         // Bottom padding
                 ])
                 .split(size);
 
-            let title_area = main_layout[0];
-            let content_area = main_layout[1];
+            let title_area = main_layout[1];
+            let content_area = main_layout[2];
 
             // Define your ASCII title
             let ascii_art = [
@@ -372,12 +382,14 @@ impl<B: Backend> Tui<B> {
                 .collect();
 
             // Create the title Paragraph
-            let title_paragraph = Paragraph::new(title_lines).alignment(Alignment::Center);
+            let title_paragraph = Paragraph::new(title_lines)
+                .alignment(Alignment::Center)
+                .add_modifier(Modifier::BOLD);
 
             // Render the title
             f.render_widget(title_paragraph, title_area);
 
-            // Create centered content area with a percentage of the available space
+            // Create centered content area with a percentage of the available width
             let content_width_percentage = 80; // Use 80% of available width
             let content_width = (content_area.width as u32 * content_width_percentage / 100) as u16;
 
@@ -404,10 +416,11 @@ impl<B: Backend> Tui<B> {
                     Constraint::Length(9), // Create New Track
                     Constraint::Length(1), // Gap
                     Constraint::Length(6), // Load Track (fixed height)
-                    Constraint::Min(0),    // Remaining space (empty)
+                    Constraint::Min(1),    // Remaining space (empty)
                 ])
                 .split(centered_content_area);
 
+            // Rest of the function remains the same...
             let now_playing_area = panel_layout[0];
             let create_track_area = panel_layout[2];
             let load_track_area = panel_layout[4];
@@ -432,8 +445,9 @@ impl<B: Backend> Tui<B> {
                 .split(inner_now_playing);
 
             // Track info
-            let track_info =
-                Paragraph::new("Generated Track ID - [01:15 / 02:30]").alignment(Alignment::Center);
+            let track_info = Paragraph::new("Generated Track ID - [01:15 / 02:30]")
+                .alignment(Alignment::Center)
+                .add_modifier(Modifier::BOLD);
             f.render_widget(track_info, now_playing_layout[0]);
 
             // Progress bar
@@ -456,19 +470,14 @@ impl<B: Backend> Tui<B> {
             let rewind_style = if self.current_focus == InputId::Rewind
                 && self.state.input_mode == InputMode::Navigation
             {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Yellow)
             } else {
                 Style::default()
             };
-
             let play_pause_style = if self.current_focus == InputId::PlayPause
                 && self.state.input_mode == InputMode::Navigation
             {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Yellow)
             } else {
                 Style::default()
             };
@@ -476,9 +485,7 @@ impl<B: Backend> Tui<B> {
             let skip_style = if self.current_focus == InputId::Skip
                 && self.state.input_mode == InputMode::Navigation
             {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Yellow)
             } else {
                 Style::default()
             };
@@ -486,25 +493,30 @@ impl<B: Backend> Tui<B> {
             let loop_style = if self.current_focus == InputId::Loop
                 && self.state.input_mode == InputMode::Navigation
             {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Yellow)
             } else {
                 Style::default()
             };
 
             let rewind = Paragraph::new("[<< Rewind]")
                 .style(rewind_style)
-                .alignment(Alignment::Center);
+                .alignment(Alignment::Center)
+                .add_modifier(Modifier::BOLD);
+
             let play_pause = Paragraph::new("[▶ Play/Pause]")
                 .style(play_pause_style)
-                .alignment(Alignment::Center);
+                .alignment(Alignment::Center)
+                .add_modifier(Modifier::BOLD);
+
             let skip = Paragraph::new("[>> Skip]")
                 .style(skip_style)
-                .alignment(Alignment::Center);
+                .alignment(Alignment::Center)
+                .add_modifier(Modifier::BOLD);
+
             let loop_control = Paragraph::new("[↻ Enable Loop]")
                 .style(loop_style)
-                .alignment(Alignment::Center);
+                .alignment(Alignment::Center)
+                .add_modifier(Modifier::BOLD);
 
             f.render_widget(rewind, control_layout[0]);
             f.render_widget(play_pause, control_layout[1]);
@@ -558,13 +570,9 @@ impl<B: Backend> Tui<B> {
             // Style each parameter based on focus and input mode
             let scale_style = if self.current_focus == InputId::Scale {
                 if self.state.input_mode == InputMode::Navigation {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Yellow)
                 } else {
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Green)
                 }
             } else {
                 Style::default()
@@ -572,13 +580,9 @@ impl<B: Backend> Tui<B> {
 
             let style_style = if self.current_focus == InputId::Style {
                 if self.state.input_mode == InputMode::Navigation {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Yellow)
                 } else {
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Green)
                 }
             } else {
                 Style::default()
@@ -586,13 +590,9 @@ impl<B: Backend> Tui<B> {
 
             let bpm_style = if self.current_focus == InputId::Bpm {
                 if self.state.input_mode == InputMode::Navigation {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Yellow)
                 } else {
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Green)
                 }
             } else {
                 Style::default()
@@ -600,13 +600,9 @@ impl<B: Backend> Tui<B> {
 
             let length_style = if self.current_focus == InputId::Length {
                 if self.state.input_mode == InputMode::Navigation {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Yellow)
                 } else {
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Green)
                 }
             } else {
                 Style::default()
@@ -615,15 +611,19 @@ impl<B: Backend> Tui<B> {
             // Render parameters with actual values from state
             let scale = Paragraph::new(format!("Scale: [ {} ▼]", self.state.scale))
                 .style(scale_style)
+                .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
             let style_param = Paragraph::new(format!("Style: [ {} ▼]", self.state.style))
                 .style(style_style)
+                .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
             let bpm = Paragraph::new(format!("BPM: [{}]", self.state.bpm))
                 .style(bpm_style)
+                .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
             let length = Paragraph::new(format!("Length: [{} ▼]", self.state.length))
                 .style(length_style)
+                .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
 
             f.render_widget(scale, params_layout_top[0]);
@@ -633,13 +633,9 @@ impl<B: Backend> Tui<B> {
 
             let seed_style = if self.current_focus == InputId::Seed {
                 if self.state.input_mode == InputMode::Navigation {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Yellow)
                 } else {
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Green)
                 }
             } else {
                 Style::default()
@@ -654,6 +650,7 @@ impl<B: Backend> Tui<B> {
 
             let seed = Paragraph::new(seed_display)
                 .style(seed_style)
+                .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
             f.render_widget(seed, create_track_layout[5]);
 
@@ -661,21 +658,21 @@ impl<B: Backend> Tui<B> {
             let generate_style = if self.current_focus == InputId::Generate
                 && self.state.input_mode == InputMode::Navigation
             {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Yellow)
             } else {
                 Style::default()
             };
 
             let generate = Paragraph::new("[♫ Generate]")
                 .style(generate_style)
+                .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
             f.render_widget(generate, create_track_layout[7]);
 
             // Create and render the Load Track panel
             let load_track_block = Block::default()
                 .title("Load Track by ID")
+                .add_modifier(Modifier::BOLD)
                 .borders(Borders::ALL);
 
             let inner_load_track = load_track_block.inner(load_track_area);
@@ -702,13 +699,9 @@ impl<B: Backend> Tui<B> {
             // Style track ID and load button based on focus
             let track_id_style = if self.current_focus == InputId::TrackID {
                 if self.state.input_mode == InputMode::Navigation {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Yellow)
                 } else {
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Green)
                 }
             } else {
                 Style::default()
@@ -717,9 +710,7 @@ impl<B: Backend> Tui<B> {
             let load_style = if self.current_focus == InputId::Load
                 && self.state.input_mode == InputMode::Navigation
             {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Yellow)
             } else {
                 Style::default()
             };
@@ -805,12 +796,9 @@ impl<B: Backend> Tui<B> {
                 };
 
                 // Create the list widget
-                let list = List::new(items).block(Block::default()).highlight_style(
-                    Style::default()
-                        .bg(Color::Yellow)
-                        .fg(Color::Black)
-                        .add_modifier(Modifier::BOLD),
-                );
+                let list = List::new(items)
+                    .block(Block::default())
+                    .highlight_style(Style::default().bg(Color::Yellow).fg(Color::Black));
 
                 // Render the list with state
                 f.render_stateful_widget(list, inner_popup_area, &mut self.state.popup_list_state);
