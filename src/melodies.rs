@@ -60,6 +60,7 @@ pub enum RhythmPattern {
     Complex,
     // Syncopated rhythm with some off-beat notes
     Syncopated,
+    Swung,
 }
 
 /// Generate melody samples based on given parameters
@@ -76,10 +77,10 @@ pub fn generate_melody_samples(
     const SAMPLE_RATE: f32 = 44100.0;
     // Create scale
     let scale = Scale::new(
-        ScaleType::Diatonic, // scale type
-        PitchClass::C,       // tonic
-        4,                   // octave
-        Some(Mode::Ionian),  // scale mode
+        scale_type, // scale type
+        root_note,  // tonic
+        4,          // octave
+        Some(mode), // scale mode
         Direction::Ascending,
     )
     .unwrap();
@@ -95,7 +96,7 @@ pub fn generate_melody_samples(
     let mut durations: Vec<f32> = vec![];
     let mut dur_sum = 0.0;
     let quarter_note_duration = 60.0 / bpm as f32; // Duration of one quarter note in seconds
-    // Apply rhythm pattern
+                                                   // Apply rhythm pattern
     let durations = match rhythm_pattern {
         RhythmPattern::Simple => {
             // All quarter notes
@@ -113,7 +114,11 @@ pub fn generate_melody_samples(
 
             while dur_sum < duration_seconds as f32 {
                 // 50% chance of quarter note, 50% chance of eighth note
-                let duration = if rng.random::<bool>() { 1.0 * quarter_note_duration} else { 0.5 * quarter_note_duration};
+                let duration = if rng.random::<bool>() {
+                    1.0 * quarter_note_duration
+                } else {
+                    0.5 * quarter_note_duration
+                };
                 durations.push(duration);
                 dur_sum += duration;
             }
@@ -138,6 +143,18 @@ pub fn generate_melody_samples(
 
             durations
         }
+        RhythmPattern::Swung => {
+            // Mix of quarter and eighth notes
+
+            for _ in 0..(duration_seconds as f32 / quarter_note_duration) as i32 {
+                durations.push(0.66 * quarter_note_duration);
+                durations.push(0.34 * quarter_note_duration);
+                dur_sum = 0.0;
+            }
+
+            durations
+        }
+
         RhythmPattern::Syncopated => {
             // Syncopated rhythm with some off-beat notes
             let mut durations = vec![];
@@ -248,8 +265,8 @@ pub fn generate_melody_samples(
         // Generate the sine wave for this note
         let mut note_signal = dasp_signal::rate(SAMPLE_RATE as f64)
             .const_hz(frequency as f64)
-            .sine()
-            .map(|x| (x * 0.5) as f32); // Half amplitude to prevent distortion
+            .square()
+            .map(|x| (x * 0.3) as f32); // Half amplitude to prevent distortion
 
         // Add the sound part
         for _ in 0..sound_samples {
@@ -366,6 +383,7 @@ pub fn create_custom_melody(
         "simple" => RhythmPattern::Simple,
         "medium" => RhythmPattern::Medium,
         "complex" => RhythmPattern::Complex,
+        "swung" => RhythmPattern::Swung,
         "syncopated" => RhythmPattern::Syncopated,
         _ => RhythmPattern::Simple, // Default to simple
     };

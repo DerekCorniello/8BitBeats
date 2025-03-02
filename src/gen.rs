@@ -10,28 +10,22 @@ use std::time::Duration;
 use rodio::buffer::SamplesBuffer;
 use rodio::{OutputStream, Sink, Source};
 
-fn play_progression(
-    prog_name: String,
-    root_note: u8,
-    chord_duration: f32,
-    mut audio_sequence: Vec<f32>,
-) -> Vec<f32> {
+fn play_progression(prog_name: String, root_note: u8, chord_duration: f32) -> (Vec<f32>, f32) {
     println!("Playing progression...");
     // Get the progression chords
     let progression = progs::get_progression(prog_name, root_note, chord_duration);
 
-    // Short silence between segments
-    let silence_duration_samples = (44100.0 * 0.0) as usize; // 300ms
-    let silence_samples = vec![0.0; silence_duration_samples]; // Silence is represented by zeros
+    // Calculate total duration
+    let total_duration = chord_duration * progression.len() as f32;
 
-    // Add each chord to the sequence with silence in between
+    // Combine all chord samples
+    let mut audio_sequence = Vec::new();
     for chord in progression {
         audio_sequence.extend_from_slice(&chord);
-        audio_sequence.extend_from_slice(&silence_samples);
     }
 
-    // Return the modified sequence
-    audio_sequence
+    // Return the sequence and its duration
+    (audio_sequence, total_duration)
 }
 
 fn read_char() -> Option<char> {
@@ -96,35 +90,46 @@ fn main() {
         .expect("Failed to read line");
     let root_note: u8 = root_note.trim().parse().unwrap_or(0);
 
-    // Create our audio sequence based on user choice
-    let mut audio_sequence = Vec::new();
-
-    audio_sequence = match choice {
-        "1" => play_progression(
-            String::from("blues"),
-            root_note,
-            chord_duration,
-            audio_sequence,
-        ),
-        "2" => play_progression(
-            String::from("pop"),
-            root_note,
-            chord_duration,
-            audio_sequence,
-        ),
-        "3" => play_progression(
-            String::from("jazz"),
-            root_note,
-            chord_duration,
-            audio_sequence,
-        ),
-        _ => play_progression(
-            String::from("default"),
-            root_note,
-            chord_duration,
-            audio_sequence,
-        ),
+    // Get progression based on user choice
+    let (chord_sequence, progression_duration) = match choice {
+        "1" => play_progression(String::from("blues"), root_note, chord_duration),
+        "2" => play_progression(String::from("pop"), root_note, chord_duration),
+        "3" => play_progression(String::from("jazz"), root_note, chord_duration),
+        _ => play_progression(String::from("default"), root_note, chord_duration),
     };
+
+    // Create melody that matches the progression's key and duration
+    println!("Creating melody to match progression...");
+    let melody = melodies::create_custom_melody(
+        root_note,
+        "diatonic",
+        "minor",
+        3,
+        "complex",
+        progression_duration,
+        120,
+    );
+
+    // Mix the melody and chord progression
+    println!("Mixing melody and chord progression...");
+    let mut mixed_audio = Vec::with_capacity(chord_sequence.len().max(melody.len()));
+    let chord_gain = 0.4; // Slightly lower volume for chords
+    let melody_gain = 0.6; // Slightly higher volume for melody
+
+    // Add samples together with appropriate gain to avoid clipping
+    for i in 0..mixed_audio.capacity() {
+        let chord_sample = if i < chord_sequence.len() {
+            chord_sequence[i] * chord_gain
+        } else {
+            0.0
+        };
+        let melody_sample = if i < melody.len() {
+            melody[i] * melody_gain
+        } else {
+            0.0
+        };
+        mixed_audio.push(chord_sample + melody_sample);
+    }
 
     // Set up audio output system
     let (_stream, stream_handle) =
@@ -197,9 +202,9 @@ fn main() {
             // Create a new audio sink (output)
             let audio_sink = Sink::try_new(&stream_handle).expect("Failed to create audio sink");
 
-            // Prepare audio data and set it to repeat
+            // Prepare mixed audio data and set it to repeat
             let audio_source =
-                SamplesBuffer::new(1, sample_rate, audio_sequence.clone()).repeat_infinite();
+                SamplesBuffer::new(2, sample_rate, mixed_audio.clone()).repeat_infinite();
 
             // Add the audio to the sink
             audio_sink.append(audio_source);
@@ -238,3 +243,4 @@ fn main() {
 
     println!("Playback ended.");
 }
+
