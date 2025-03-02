@@ -1,5 +1,6 @@
 mod melodies;
 mod tui;
+mod gen;
 use crate::tui::Tui;
 
 use ratatui::prelude::CrosstermBackend;

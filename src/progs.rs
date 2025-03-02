@@ -103,8 +103,8 @@ pub fn generate_chord_samples(
         .map(|&freq| {
             dasp_signal::rate(sample_rate as f64) // Set the sample rate
                 .const_hz(freq as f64) // Create a constant frequency
-                .sine() // Generate a sine wave
-                .map(|x| (x * 0.3) as f32) // Reduce amplitude to avoid distortion
+                .square() // Generate a sine wave
+                .map(|x| (x * 0.1) as f32) // Reduce amplitude to avoid distortion
         })
         .collect();
 
