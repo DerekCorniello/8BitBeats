@@ -295,4 +295,3 @@ pub fn get_progression(prog_name: String, root: u8, chord_duration: f32) -> Vec<
         }
     }
 }
-
