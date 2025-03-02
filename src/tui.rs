@@ -1107,9 +1107,8 @@ impl<B: Backend> Tui<B> {
                         // Navigate right
                         self.current_focus = next_focus(self.current_focus, Direction::Right);
                     }
-                    (InputMode::Navigation, KeyCode::Tab) => {
-                        // TODO: IMPLEMENT SHIFT TAB
-                        // Tab key cycles through the inputs in a predefined order
+                    // Handle backward tabbing with Shift+Tab
+                    (InputMode::Navigation, KeyCode::BackTab) => {
                         let tab_order = [
                             InputId::Rewind,
                             InputId::PlayPause,
@@ -1124,23 +1123,41 @@ impl<B: Backend> Tui<B> {
                             InputId::TrackID,
                             InputId::Load,
                         ];
-
-                        // Find current position in tab order
-                        if let Some(current_pos) =
-                            tab_order.iter().position(|&id| id == self.current_focus)
-                        {
-                            // Move to next position, wrapping around if needed
+                        if let Some(current_pos) = tab_order.iter().position(|&id| id == self.current_focus) {
+                            let prev_pos = if current_pos == 0 {
+                                tab_order.len() - 1
+                            } else {
+                                current_pos - 1
+                            };
+                            self.current_focus = tab_order[prev_pos];
+                        } else {
+                            self.current_focus = tab_order[tab_order.len() - 1];
+                        }
+                    },
+                    (InputMode::Navigation, KeyCode::Tab) => {
+                        let tab_order = [
+                            InputId::Rewind,
+                            InputId::PlayPause,
+                            InputId::Skip,
+                            InputId::Loop,
+                            InputId::Scale,
+                            InputId::Style,
+                            InputId::Bpm,
+                            InputId::Length,
+                            InputId::Seed,
+                            InputId::Generate,
+                            InputId::TrackID,
+                            InputId::Load,
+                        ];
+                        if let Some(current_pos) = tab_order.iter().position(|&id| id == self.current_focus) {
                             let next_pos = (current_pos + 1) % tab_order.len();
                             self.current_focus = tab_order[next_pos];
                         } else {
-                            // If not found (shouldn't happen), default to first
                             self.current_focus = tab_order[0];
                         }
                     }
                     _ => {}
                 }
-
-                // Check for Ctrl+C to exit
                 if code == KeyCode::Char('c') && modifiers == KeyModifiers::CONTROL {
                     return Ok(false);
                 }
