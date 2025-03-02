@@ -1,5 +1,5 @@
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction as LayoutDirection, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Padding, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, StatefulWidget},
     Terminal,
 };
 
@@ -178,10 +178,63 @@ fn next_focus(current: InputId, direction: Direction) -> InputId {
         .unwrap_or(current) // Return the current focus if no transition is found
 }
 
+// Input mode to determine how to handle user input
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputMode {
+    Navigation,   // For navigating between fields
+    Editing,      // For editing a text field
+    ScalePopup,   // When the scale popup is active
+}
+
+// AppState to store application state
+#[derive(Debug)]
+struct AppState {
+    scale: String,
+    bpm: String,
+    length: String,
+    seed: String,
+    track_id: String,
+    input_mode: InputMode,
+    popup_list_state: ListState,
+    scales: Vec<String>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        // Create list of scales and set initial selection
+        let scales = vec![
+            "Major".to_string(),
+            "Minor".to_string(),
+            "Dorian".to_string(),
+            "Phrygian".to_string(),
+            "Lydian".to_string(),
+            "Mixolydian".to_string(),
+            "Locrian".to_string(),
+            "Blues".to_string(),
+            "Pentatonic".to_string(),
+        ];
+        
+        let mut popup_list_state = ListState::default();
+        popup_list_state.select(Some(0)); // Select the first item by default
+        
+        Self {
+            scale: "Major".to_string(),
+            bpm: "120".to_string(),
+            length: "30 sec".to_string(),
+            seed: "".to_string(),
+            track_id: "".to_string(),
+            input_mode: InputMode::Navigation,
+            popup_list_state,
+            scales,
+        }
+    }
+}
+
 // TUI struct represents the terminal user interface, parameterized by the type of backend (B)
 pub struct Tui<B: Backend> {
     terminal: Terminal<B>,
     current_focus: InputId,
+    state: AppState,
 }
 
 impl<B: Backend> Tui<B> {
@@ -191,6 +244,7 @@ impl<B: Backend> Tui<B> {
         Ok(Self {
             terminal,
             current_focus: InputId::PlayPause,
+            state: AppState::default(),
         })
     }
 
@@ -347,7 +401,9 @@ impl<B: Backend> Tui<B> {
                 .split(now_playing_layout[4]);
 
             // Define control buttons with appropriate styling based on focus
-            let rewind_style = if self.current_focus == InputId::Rewind {
+            let rewind_style = if self.current_focus == InputId::Rewind
+                && self.state.input_mode == InputMode::Navigation
+            {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
@@ -355,7 +411,9 @@ impl<B: Backend> Tui<B> {
                 Style::default()
             };
 
-            let play_pause_style = if self.current_focus == InputId::PlayPause {
+            let play_pause_style = if self.current_focus == InputId::PlayPause
+                && self.state.input_mode == InputMode::Navigation
+            {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
@@ -363,7 +421,9 @@ impl<B: Backend> Tui<B> {
                 Style::default()
             };
 
-            let skip_style = if self.current_focus == InputId::Skip {
+            let skip_style = if self.current_focus == InputId::Skip
+                && self.state.input_mode == InputMode::Navigation
+            {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
@@ -371,7 +431,9 @@ impl<B: Backend> Tui<B> {
                 Style::default()
             };
 
-            let loop_style = if self.current_focus == InputId::Loop {
+            let loop_style = if self.current_focus == InputId::Loop
+                && self.state.input_mode == InputMode::Navigation
+            {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
@@ -429,39 +491,51 @@ impl<B: Backend> Tui<B> {
                 ])
                 .split(create_track_layout[1]);
 
-            // Style each parameter based on focus
+            // Style each parameter based on focus and input mode
             let scale_style = if self.current_focus == InputId::Scale {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+                if self.state.input_mode == InputMode::Navigation {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                }
             } else {
                 Style::default()
             };
 
             let bpm_style = if self.current_focus == InputId::Bpm {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+                if self.state.input_mode == InputMode::Navigation {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                }
             } else {
                 Style::default()
             };
 
             let length_style = if self.current_focus == InputId::Length {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+                if self.state.input_mode == InputMode::Navigation {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                }
             } else {
                 Style::default()
             };
 
-            // Render parameters
-            let scale = Paragraph::new("Scale: [ Major    ▼]")
+            // Render parameters with actual values from state
+            let scale = Paragraph::new(format!("Scale: [ {} ▼]", self.state.scale))
                 .style(scale_style)
                 .alignment(Alignment::Center);
-            let bpm = Paragraph::new("BPM: [120   ]")
+            let bpm = Paragraph::new(format!("BPM: [{}]", self.state.bpm))
                 .style(bpm_style)
                 .alignment(Alignment::Center);
-            let length = Paragraph::new("Length: [30 sec  ]")
+            let length = Paragraph::new(format!("Length: [{}]", self.state.length))
                 .style(length_style)
                 .alignment(Alignment::Center);
 
@@ -471,20 +545,33 @@ impl<B: Backend> Tui<B> {
 
             // Seed input
             let seed_style = if self.current_focus == InputId::Seed {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+                if self.state.input_mode == InputMode::Navigation {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                }
             } else {
                 Style::default()
             };
 
-            let seed = Paragraph::new("Seed (optional): [______]")
+            // Format the seed display
+            let seed_display = if self.state.seed.is_empty() {
+                "Seed (optional): [______]".to_string()
+            } else {
+                format!("Seed (optional): [{}]", self.state.seed)
+            };
+
+            let seed = Paragraph::new(seed_display)
                 .style(seed_style)
                 .alignment(Alignment::Center);
             f.render_widget(seed, create_track_layout[3]);
 
             // Generate button
-            let generate_style = if self.current_focus == InputId::Generate {
+            let generate_style = if self.current_focus == InputId::Generate
+                && self.state.input_mode == InputMode::Navigation
+            {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
@@ -525,6 +612,20 @@ impl<B: Backend> Tui<B> {
 
             // Style track ID and load button based on focus
             let track_id_style = if self.current_focus == InputId::TrackID {
+                if self.state.input_mode == InputMode::Navigation {
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                }
+            } else {
+                Style::default()
+            };
+
+            let load_style = if self.current_focus == InputId::Load
+                && self.state.input_mode == InputMode::Navigation
+            {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
@@ -532,16 +633,15 @@ impl<B: Backend> Tui<B> {
                 Style::default()
             };
 
-            let load_style = if self.current_focus == InputId::Load {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
+            // Format track ID display
+            let track_id_display = if self.state.track_id.is_empty() {
+                "Track ID: [________________________________]".to_string()
             } else {
-                Style::default()
+                format!("Track ID: [{}]", self.state.track_id)
             };
 
             // Render Track ID and Load button
-            let track_id = Paragraph::new("Track ID: [________________________________]")
+            let track_id = Paragraph::new(track_id_display)
                 .style(track_id_style)
                 .alignment(Alignment::Center);
             let load = Paragraph::new("[↓ Load]")
@@ -550,6 +650,84 @@ impl<B: Backend> Tui<B> {
 
             f.render_widget(track_id, track_id_layout[0]);
             f.render_widget(load, track_id_layout[1]);
+
+            // Draw the scale popup if it's active
+            if self.state.input_mode == InputMode::ScalePopup {
+                // Calculate the popup dimensions and position
+                let popup_width = 20;
+                let popup_height = 12;
+                let popup_x = (terminal_width - popup_width) / 2;
+                let popup_y = (terminal_height - popup_height) / 2;
+                
+                let popup_area = Rect {
+                    x: popup_x,
+                    y: popup_y,
+                    width: popup_width,
+                    height: popup_height,
+                };
+                
+                // Clear the area under the popup
+                f.render_widget(Clear, popup_area);
+                
+                // Create a block for the popup
+                let popup_block = Block::default()
+                    .title("Select Scale")
+                    .borders(Borders::ALL)
+                    .style(Style::default().bg(Color::DarkGray));
+                
+                f.render_widget(popup_block.clone(), popup_area);
+                
+                // Create the inner area for the list
+                let inner_popup_area = popup_block.inner(popup_area);
+                
+                // Create list items from scales
+                let items: Vec<ListItem> = self.state.scales
+                    .iter()
+                    .map(|s| {
+                        ListItem::new(s.clone())
+                    })
+                    .collect();
+                
+                // Create the list widget
+                let scales_list = List::new(items)
+                    .block(Block::default())
+                    .highlight_style(
+                        Style::default()
+                            .bg(Color::Yellow)
+                            .fg(Color::Black)
+                            .add_modifier(Modifier::BOLD),
+                    );
+                
+                // Render the list with state
+                f.render_stateful_widget(scales_list, inner_popup_area, &mut self.state.popup_list_state);
+            }
+
+            // Show cursor when in editing mode
+            if self.state.input_mode == InputMode::Editing {
+                match self.current_focus {
+                    InputId::Bpm => {
+                        let x = params_layout[1].x + 6 + self.state.bpm.len() as u16;
+                        let y = params_layout[1].y;
+                        f.set_cursor(x, y);
+                    }
+                    InputId::Length => {
+                        let x = params_layout[2].x + 9 + self.state.length.len() as u16;
+                        let y = params_layout[2].y;
+                        f.set_cursor(x, y);
+                    }
+                    InputId::Seed => {
+                        let x = create_track_layout[3].x + 17 + self.state.seed.len() as u16;
+                        let y = create_track_layout[3].y;
+                        f.set_cursor(x, y);
+                    }
+                    InputId::TrackID => {
+                        let x = track_id_layout[0].x + 11 + self.state.track_id.len() as u16;
+                        let y = track_id_layout[0].y;
+                        f.set_cursor(x, y);
+                    }
+                    _ => {}
+                }
+            }
         })?;
         Ok(())
     }
@@ -558,49 +736,246 @@ impl<B: Backend> Tui<B> {
     pub fn handle_input(&mut self) -> std::io::Result<bool> {
         match event::read()? {
             // Handle key events
-            Event::Key(KeyEvent { code, .. }) => {
-                match code {
-                    KeyCode::Char('q') => {
-                        // Quit the app when 'q' is pressed
+            Event::Key(KeyEvent { code, modifiers, .. }) => {
+                match (self.state.input_mode, code) {
+                    // In Scale Popup mode
+                    (InputMode::ScalePopup, KeyCode::Esc) => {
+                        // Exit popup mode
+                        self.state.input_mode = InputMode::Navigation;
+                    }
+                    (InputMode::ScalePopup, KeyCode::Enter) => {
+                        // Select the current scale and exit popup mode
+                        if let Some(selected) = self.state.popup_list_state.selected() {
+                            self.state.scale = self.state.scales[selected].clone();
+                        }
+                        self.state.input_mode = InputMode::Navigation;
+                    }
+                    (InputMode::ScalePopup, KeyCode::Up) | (InputMode::ScalePopup, KeyCode::Char('k')) => {
+                        // Navigate up in the scale list
+                        let selected = self.state.popup_list_state.selected().unwrap_or(0);
+                        let new_selection = if selected > 0 {
+                            selected - 1
+                        } else {
+                            self.state.scales.len() - 1
+                        };
+                        self.state.popup_list_state.select(Some(new_selection));
+                    }
+                    (InputMode::ScalePopup, KeyCode::Down) | (InputMode::ScalePopup, KeyCode::Char('j')) => {
+                        // Navigate down in the scale list
+                        let selected = self.state.popup_list_state.selected().unwrap_or(0);
+                        let new_selection = if selected < self.state.scales.len() - 1 {
+                            selected + 1
+                        } else {
+                            0
+                        };
+                        self.state.popup_list_state.select(Some(new_selection));
+                    }
+                    
+                    // In Editing mode
+                    (InputMode::Editing, KeyCode::Esc) => {
+                        // Exit editing mode
+                        self.state.input_mode = InputMode::Navigation;
+                    }
+                    (InputMode::Editing, KeyCode::Enter) => {
+                        // Confirm editing and exit editing mode
+                        self.state.input_mode = InputMode::Navigation;
+                    }
+                    (InputMode::Editing, KeyCode::Backspace) => {
+                        // Handle backspace for text fields
+                        match self.current_focus {
+                            InputId::Bpm => {
+                                self.state.bpm.pop();
+                            }
+                            InputId::Length => {
+                                self.state.length.pop();
+                            }
+                            InputId::Seed => {
+                                self.state.seed.pop();
+                            }
+                            InputId::TrackID => {
+                                self.state.track_id.pop();
+                            }
+                            _ => {}
+                        }
+                    }
+                    (InputMode::Editing, KeyCode::Char(c)) => {
+                        // Handle character input for text fields
+                        match self.current_focus {
+                            InputId::Bpm => {
+                                // Only allow numbers for BPM
+                                if c.is_numeric() {
+                                    self.state.bpm.push(c);
+                                }
+                            }
+InputId::Length => {
+                                // Allow numbers, spaces, and some text for length (like "30 sec")
+                                if c.is_numeric() || c.is_alphabetic() || c == ' ' {
+                                    self.state.length.push(c);
+                                }
+                            }
+                            InputId::Seed => {
+                                // Allow alphanumeric characters for seed
+                                if c.is_alphanumeric() {
+                                    self.state.seed.push(c);
+                                }
+                            }
+                            InputId::TrackID => {
+                                // Allow alphanumeric and some special characters for track ID
+                                if c.is_alphanumeric() || c == '-' || c == '_' {
+                                    self.state.track_id.push(c);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    
+                    // In Navigation mode
+                    (InputMode::Navigation, KeyCode::Char('q')) | (InputMode::Navigation, KeyCode::Esc) => {
+                        // Quit the application with q or Esc
                         return Ok(false);
                     }
-                    KeyCode::Enter => {
-                        // Handle the Enter key based on current focus
-                        // You can expand this to handle different actions for different input focuses
-                        todo!("handle input");
+                    (InputMode::Navigation, KeyCode::Enter) => {
+                        // Handle Enter key in navigation mode
+                        match self.current_focus {
+                            InputId::Scale => {
+                                // Open scale popup
+                                self.state.input_mode = InputMode::ScalePopup;
+                                // Find the index of the current scale to select it in the popup
+                                if let Some(index) = self.state.scales.iter().position(|s| s == &self.state.scale) {
+                                    self.state.popup_list_state.select(Some(index));
+                                }
+                            }
+                            InputId::Bpm | InputId::Length | InputId::Seed | InputId::TrackID => {
+                                // Enter editing mode for these fields
+                                self.state.input_mode = InputMode::Editing;
+                            }
+                            InputId::Generate => {
+                                // Handle generate button action
+                                // For now, just print a message (would be implemented with actual generation)
+                                // In a real app, this would trigger music generation
+                            }
+                            InputId::Load => {
+                                // Handle load button action
+                                // For now, just print a message (would be implemented with actual loading)
+                                // In a real app, this would load a track by ID
+                            }
+                            InputId::Rewind => {
+                                // Handle rewind action
+                            }
+                            InputId::PlayPause => {
+                                // Handle play/pause action
+                            }
+                            InputId::Skip => {
+                                // Handle skip action
+                            }
+                            InputId::Loop => {
+                                // Handle loop toggle action
+                            }
+                        }
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        // Handle Up arrow or vim 'k'
-                        self.move_focus(Direction::Up);
+                    (InputMode::Navigation, KeyCode::Up) => {
+                        // Navigate up
+                        self.current_focus = next_focus(self.current_focus, Direction::Up);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        // Handle Down arrow or vim 'j'
-                        self.move_focus(Direction::Down);
+                    (InputMode::Navigation, KeyCode::Down) => {
+                        // Navigate down
+                        self.current_focus = next_focus(self.current_focus, Direction::Down);
                     }
-                    KeyCode::Left | KeyCode::Char('h') => {
-                        // Handle Left arrow or vim 'h'
-                        self.move_focus(Direction::Left);
+                    (InputMode::Navigation, KeyCode::Left) => {
+                        // Navigate left
+                        self.current_focus = next_focus(self.current_focus, Direction::Left);
                     }
-                    KeyCode::Right | KeyCode::Char('l') => {
-                        // Handle Right arrow or vim 'l'
-                        self.move_focus(Direction::Right);
+                    (InputMode::Navigation, KeyCode::Right) => {
+                        // Navigate right
+                        self.current_focus = next_focus(self.current_focus, Direction::Right);
                     }
-                    _ => {
-                        // For other keys, do nothing or add custom logic
+                    (InputMode::Navigation, KeyCode::Tab) => {
+                        // Tab key cycles through the inputs in a predefined order
+                        let tab_order = [
+                            InputId::Rewind, 
+                            InputId::PlayPause, 
+                            InputId::Skip, 
+                            InputId::Loop,
+                            InputId::Scale, 
+                            InputId::Bpm, 
+                            InputId::Length, 
+                            InputId::Seed,
+                            InputId::Generate, 
+                            InputId::TrackID, 
+                            InputId::Load
+                        ];
+                        
+                        // Find current position in tab order
+                        if let Some(current_pos) = tab_order.iter().position(|&id| id == self.current_focus) {
+                            // Move to next position, wrapping around if needed
+                            let next_pos = (current_pos + 1) % tab_order.len();
+                            self.current_focus = tab_order[next_pos];
+                        } else {
+                            // If not found (shouldn't happen), default to first
+                            self.current_focus = tab_order[0];
+                        }
                     }
+                    (InputMode::Navigation, KeyCode::Char('S')) | (InputMode::Navigation, KeyCode::Char('s')) => {
+                        // Shortcut to Scale
+                        self.current_focus = InputId::Scale;
+                    }
+                    (InputMode::Navigation, KeyCode::Char('B')) | (InputMode::Navigation, KeyCode::Char('b')) => {
+                        // Shortcut to BPM
+                        self.current_focus = InputId::Bpm;
+                    }
+                    (InputMode::Navigation, KeyCode::Char('G')) | (InputMode::Navigation, KeyCode::Char('g')) => {
+                        // Shortcut to Generate
+                        self.current_focus = InputId::Generate;
+                    }
+                    (InputMode::Navigation, KeyCode::Char('L')) | (InputMode::Navigation, KeyCode::Char('l')) => {
+                        // Shortcut to Load
+                        self.current_focus = InputId::Load;
+                    }
+                    _ => {}
+                }
+                
+                // Check for Ctrl+C to exit
+                if code == KeyCode::Char('c') && modifiers == KeyModifiers::CONTROL {
+                    return Ok(false);
                 }
             }
-            // Ignore non-key events (e.g., mouse events, focus events)
             _ => {}
         }
         Ok(true)
     }
 
-    // Method to move the focus
-    fn move_focus(&mut self, direction: Direction) {
-        let current_focus = self.current_focus;
-        self.current_focus = next_focus(current_focus, direction);
-        self.draw().unwrap();
+    // Main run method for the application
+    pub fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Set up the terminal
+        self.setup()?;
+        
+        // Main application loop
+        let mut running = true;
+        while running {
+            // Draw the UI
+            self.draw()?;
+            
+            // Handle input (returns false when user wants to quit)
+            running = self.handle_input()?;
+        }
+        
+        // Clean up before exiting
+        self.teardown()?;
+        
+        Ok(())
     }
 }
 
+// Example usage for this TUI
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create a new terminal backend
+    let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+    
+    // Create a new TUI instance
+    let mut tui = Tui::new(backend)?;
+    
+    // Run the application
+    tui.run()?;
+    
+    Ok(())
+}
