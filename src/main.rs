@@ -2,7 +2,6 @@ mod gen;
 mod melodies;
 mod progs;
 mod tui;
-mod gen;
 use crate::tui::Tui;
 
 use ratatui::prelude::CrosstermBackend;

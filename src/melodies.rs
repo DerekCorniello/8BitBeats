@@ -285,7 +285,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
                 root_pitch,
                 ScaleType::Diatonic,
                 Mode::Ionian,
-                4,                         // Middle octave
+                3,                         // Middle octave
                 RhythmPattern::Syncopated, // Blues has syncopated rhythm
                 duration,
                 bpm,
@@ -298,7 +298,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
                 root_pitch,
                 ScaleType::Diatonic,
                 Mode::Ionian,          // Major scale
-                4,                     // Middle octave
+                3,                     // Middle octave
                 RhythmPattern::Medium, // Pop usually has straightforward rhythm
                 duration,
                 bpm,
@@ -317,7 +317,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
                 root_pitch,
                 ScaleType::Diatonic,
                 jazz_mode,
-                4,                      // Middle octave
+                3,                      // Middle octave
                 RhythmPattern::Complex, // Jazz has complex rhythms
                 duration,
                 bpm,
@@ -330,7 +330,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32) -> Vec<f32> {
                 root_pitch,
                 ScaleType::Diatonic,
                 Mode::Ionian, // Major scale
-                4,            // Middle octave
+                3,            // Middle octave
                 RhythmPattern::Simple,
                 duration,
                 bpm,

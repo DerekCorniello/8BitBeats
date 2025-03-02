@@ -306,7 +306,7 @@ impl<B: Backend> Tui<B> {
     pub fn new(backend: B) -> Result<Self, Box<dyn std::error::Error>> {
         let terminal = Terminal::new(backend)?;
         // setup the music process
-        MUSIC_PROCESS.set(Arc::new(Mutex::new(None))).unwrap();
+        MUSIC_THREAD.set(Arc::new(Mutex::new(None))).unwrap();
         Ok(Self {
             terminal,
             current_focus: InputId::PlayPause,

@@ -5,7 +5,6 @@ use rodio::buffer::SamplesBuffer;
 use rodio::{OutputStream, Sink, Source};
 
 fn play_progression(prog_name: String, root_note: u8, chord_duration: f32) -> Vec<f32> {
-    println!("Playing progression...");
     // Get the progression chords
     let progression = progs::get_progression(prog_name, root_note, chord_duration);
 
@@ -68,7 +67,6 @@ pub fn play_music() {
     // Add the audio to the sink
     audio_sink.append(audio_source);
 
-    println!("Starting playback loop. Press SPACE to pause/resume.");
 
     // Continue until the sink is empty or we're told to stop
     while !audio_sink.empty() {
