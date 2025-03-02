@@ -1,43 +1,246 @@
 mod melodies;
-mod test;
-mod tui;
-use crate::tui::Tui;
+mod progs;
 
-use ratatui::prelude::CrosstermBackend;
+use std::io::stdin;
+use std::io::Read;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
 use rodio::buffer::SamplesBuffer;
-use rodio::OutputStream;
-use rodio::{Sink, Source};
-use std::io;
+use rodio::{OutputStream, Sink, Source};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let stdout = io::stdout();
-    let backend = CrosstermBackend::new(stdout);
-    let mut tui = Tui::new(backend)?;
+fn play_progression(prog_name: String, root_note: u8, chord_duration: f32) -> (Vec<f32>, f32) {
+    println!("Playing progression...");
+    // Get the progression chords
+    let progression = progs::get_progression(prog_name, root_note, chord_duration);
 
-    tui.setup()?;
+    // Calculate total duration
+    let total_duration = chord_duration * progression.len() as f32;
 
-    loop {
-        tui.draw()?;
-        let all_samples =
-            melodies::create_custom_melody(0, "diatonic", "major", 4, "syncopated", 10.0, 120);
-
-        let (_stream, stream_handle) =
-            OutputStream::try_default().expect("Failed to get output stream");
-
-        let audio_sink = Sink::try_new(&stream_handle).expect("Failed to create audio sink");
-
-        // Prepare audio data and set it to repeat
-        let audio_source =
-            SamplesBuffer::new(1, 44100, all_samples.clone()).repeat_infinite();
-
-        // Add the audio to the sink
-        audio_sink.append(audio_source);
-        if !tui.handle_input()? {
-            break;
-        }
+    // Combine all chord samples
+    let mut audio_sequence = Vec::new();
+    for chord in progression {
+        audio_sequence.extend_from_slice(&chord);
     }
 
-    tui.teardown()?;
-
-    Ok(())
+    // Return the sequence and its duration
+    (audio_sequence, total_duration)
 }
+
+fn read_char() -> Option<char> {
+    // Create a 1-byte buffer to store the character
+    let mut buffer = [0; 1];
+
+    // Try to read exactly one byte from standard input
+    match stdin().read_exact(&mut buffer) {
+        Ok(_) => Some(buffer[0] as char), // Convert the byte to a character
+        Err(_) => None,                   // Return None if reading failed
+    }
+}
+
+/// Set terminal to raw mode (no line buffering)
+/// This allows reading single keypresses without requiring Enter
+fn set_raw_mode() {
+    // For non-Windows systems (Unix-like)
+    #[cfg(not(windows))]
+    {
+        use std::process::Command;
+        // Execute the 'stty raw' command to set terminal to raw mode
+        Command::new("stty").arg("raw").status().unwrap();
+    }
+}
+
+/// Restore normal terminal mode
+fn reset_terminal() {
+    // For non-Windows systems (Unix-like)
+    #[cfg(not(windows))]
+    {
+        use std::process::Command;
+        // Execute the 'stty -raw' command to return terminal to normal mode
+        Command::new("stty").arg("-raw").status().unwrap();
+    }
+}
+
+fn main() {
+    // Audio settings
+    let sample_rate = 44100; // CD-quality audio (44.1 kHz)
+    let chord_duration = 2.0; // Duration of each chord segment in seconds
+
+    // Available progressions
+    println!("Chord Progression Player");
+    println!("========================");
+    println!("Available progressions:");
+    println!("1. Blues progression (I-IV-V-IV)");
+    println!("2. Pop progression (I-V-vi-IV)");
+    println!("3. Jazz progression (ii-V-I)");
+    println!("4. Simple progression (I-IV)");
+    println!("\nEnter choice (1-4): ");
+
+    // Read user choice
+    let mut choice = String::new();
+    stdin().read_line(&mut choice).expect("Failed to read line");
+    let choice = choice.trim();
+
+    // Read root note
+    println!("\nEnter root note (0-11, where 0=C, 1=C#, 2=D, etc.): ");
+    let mut root_note = String::new();
+    stdin()
+        .read_line(&mut root_note)
+        .expect("Failed to read line");
+    let root_note: u8 = root_note.trim().parse().unwrap_or(0);
+
+    // Get progression based on user choice
+    let (chord_sequence, progression_duration) = match choice {
+        "1" => play_progression(String::from("blues"), root_note, chord_duration),
+        "2" => play_progression(String::from("pop"), root_note, chord_duration),
+        "3" => play_progression(String::from("jazz"), root_note, chord_duration),
+        _ => play_progression(String::from("default"), root_note, chord_duration),
+    };
+
+    // Create melody that matches the progression's key and duration
+    println!("Creating melody to match progression...");
+    let melody = melodies::create_custom_melody(
+        root_note,
+        "diatonic",
+        "minor",
+        3,
+        "swung",
+        progression_duration,
+        120,
+    );
+
+    // Mix the melody and chord progression
+    println!("Mixing melody and chord progression...");
+    let mut mixed_audio = Vec::with_capacity(chord_sequence.len().max(melody.len()));
+    let chord_gain = 0.4; // Slightly lower volume for chords
+    let melody_gain = 0.6; // Slightly higher volume for melody
+
+    // Add samples together with appropriate gain to avoid clipping
+    for i in 0..mixed_audio.capacity() {
+        let chord_sample = if i < chord_sequence.len() {
+            chord_sequence[i] * chord_gain
+        } else {
+            0.0
+        };
+        let melody_sample = if i < melody.len() {
+            melody[i] * melody_gain
+        } else {
+            0.0
+        };
+        mixed_audio.push(chord_sample + melody_sample);
+    }
+
+    // Set up audio output system
+    let (_stream, stream_handle) =
+        OutputStream::try_default().expect("Failed to get output stream");
+
+    // Create shared state variables for thread communication
+    let is_playback_paused = Arc::new(Mutex::new(false)); // Tracks if playback is paused
+    let should_continue_running = Arc::new(Mutex::new(true)); // Tracks if program should continue running
+
+    // Clone the Arcs for the input thread
+    let is_playback_paused_for_input = Arc::clone(&is_playback_paused);
+    let should_continue_running_for_input = Arc::clone(&should_continue_running);
+
+    // Create a thread for handling keyboard input
+    let input_thread = thread::spawn(move || {
+        println!("\nControls:");
+        println!("- Press SPACE to pause/resume playback");
+        println!("- Press 'q' to quit");
+
+        // Set terminal to raw mode for single keypress detection
+        set_raw_mode();
+
+        loop {
+            // Try to read a single keypress
+            if let Some(key) = read_char() {
+                match key {
+                    // Space bar toggles pause/play
+                    ' ' => {
+                        // Lock the mutex to safely access the shared data
+                        let mut playback_state = is_playback_paused_for_input.lock().unwrap();
+                        // Toggle the paused state
+                        *playback_state = !*playback_state;
+
+                        // Print appropriate message
+                        if *playback_state {
+                            println!("\nPlayback paused. Press SPACE to resume.");
+                        } else {
+                            println!("\nPlayback resumed. Press SPACE to pause.");
+                        }
+                    }
+                    // 'q' key quits the program
+                    'q' => {
+                        println!("\nExiting...");
+                        // Set running to false to signal other threads to stop
+                        *should_continue_running_for_input.lock().unwrap() = false;
+                        break;
+                    }
+                    // Ignore other keypresses
+                    _ => {}
+                }
+            }
+
+            // Small sleep to avoid consuming too much CPU
+            thread::sleep(Duration::from_millis(1));
+
+            // Check if we should exit the loop
+            if !*should_continue_running_for_input.lock().unwrap() {
+                break;
+            }
+        }
+
+        // Reset terminal mode when done
+        reset_terminal();
+    });
+
+    // Create a thread for audio playback
+    let playback_thread = thread::spawn(move || {
+        // Continue playing as long as should_continue_running is true
+        while *should_continue_running.lock().unwrap() {
+            // Create a new audio sink (output)
+            let audio_sink = Sink::try_new(&stream_handle).expect("Failed to create audio sink");
+
+            // Prepare mixed audio data and set it to repeat
+            let audio_source =
+                SamplesBuffer::new(2, sample_rate, mixed_audio.clone()).repeat_infinite();
+
+            // Add the audio to the sink
+            audio_sink.append(audio_source);
+
+            println!("Starting playback loop. Press SPACE to pause/resume.");
+
+            // Continue until the sink is empty or we're told to stop
+            while !audio_sink.empty() && *should_continue_running.lock().unwrap() {
+                // Check if playback should be paused
+                if *is_playback_paused.lock().unwrap() {
+                    audio_sink.pause();
+                } else {
+                    audio_sink.play();
+                }
+
+                // Small sleep to avoid consuming too much CPU
+                thread::sleep(Duration::from_millis(100));
+            }
+
+            // Stop the sink if we're still running
+            if *should_continue_running.lock().unwrap() {
+                audio_sink.stop();
+            }
+        }
+    });
+
+    // Wait for the playback thread to finish
+    if let Err(e) = playback_thread.join() {
+        eprintln!("Error joining playback thread: {:?}", e);
+    }
+
+    // Wait for the input thread to finish
+    if let Err(e) = input_thread.join() {
+        eprintln!("Error joining input thread: {:?}", e);
+    }
+
+    println!("Playback ended.");
+}
+
