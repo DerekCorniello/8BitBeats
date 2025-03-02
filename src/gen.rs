@@ -62,7 +62,7 @@ fn reset_terminal() {
     }
 }
 
-fn play_music() {}
+pub fn play_music() {}
 
 fn main() {
     // Audio settings

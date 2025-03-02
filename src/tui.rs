@@ -14,8 +14,21 @@ use ratatui::{
     Terminal,
 };
 
-use std::sync::OnceLock;
-use std::{collections::HashMap, io};
+use std::{
+    collections::HashMap,
+    io,
+    process::{Child, Command},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
+    thread,
+    time::Duration,
+};
+
+static MUSIC_THREAD: OnceLock<Arc<Mutex<Option<thread::JoinHandle<()>>>>> = OnceLock::new();
+static MUSIC_RUNNING: AtomicBool = AtomicBool::new(false);
+static MUSIC_PAUSED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 enum InputId {
@@ -292,6 +305,8 @@ impl<B: Backend> Tui<B> {
     // Constructor method to create a new Tui instance with the provided backend
     pub fn new(backend: B) -> Result<Self, Box<dyn std::error::Error>> {
         let terminal = Terminal::new(backend)?;
+        // setup the music process
+        MUSIC_PROCESS.set(Arc::new(Mutex::new(None))).unwrap();
         Ok(Self {
             terminal,
             current_focus: InputId::PlayPause,
@@ -833,9 +848,28 @@ impl<B: Backend> Tui<B> {
         Ok(())
     }
 
-    fn pause_play(&mut self) {
-        todo!("spawn as a process so the terminal can still take inputs");
-        play_music();
+    fn pause_music() {
+        MUSIC_PAUSED.store(true, Ordering::SeqCst);
+    }
+
+    fn resume_music() {
+        MUSIC_PAUSED.store(false, Ordering::SeqCst);
+    }
+
+    fn stop_music() {
+        MUSIC_RUNNING.store(false, Ordering::SeqCst);
+
+        if let Some(handle) = MUSIC_THREAD.get().unwrap().lock().unwrap().take() {
+            let _ = handle.join(); // Ensure clean thread exit
+        }
+    }
+
+    fn pause_play() {
+        if MUSIC_PAUSED.load(Ordering::SeqCst) {
+            Tui::<B>::resume_music(); // If paused, resume
+        } else {
+            Tui::<B>::pause_music(); // If playing, pause
+        }
     }
 
     // Method to handle user input
