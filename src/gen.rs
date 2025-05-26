@@ -30,25 +30,26 @@ pub enum MusicControl {
     Pause,
     Resume,
     Terminate,
-    // LoadAndPlaySongId(String), // Removed as it's no longer used
+    Rewind,
 }
 
 // New struct for progress updates
 pub struct MusicProgress {
     pub current_samples: u64,
     pub total_samples: u64,
-    pub actual_seed: u64, // Added field for the seed
+    pub actual_seed: u64,
 }
 
 pub struct MusicPlayer {
     receiver: CrossbeamReceiver<MusicControl>,
     sink: Sink,
     _stream: OutputStream,
-
-    total_samples: u64,                 // Total samples in the current track
-    playback_start_time: Option<Instant>, // When playback (re)started
-    samples_played_at_pause: u64,       // Samples played before the last pause
-    should_terminate: bool,             // Signal to terminate the music service thread
+    current_audio_data: Option<Vec<f32>>, // Added to store current audio data
+    current_sample_rate: Option<u32>,    // Added to store current sample rate
+    total_samples: u64,
+    playback_start_time: Option<Instant>,
+    samples_played_at_pause: u64,
+    should_terminate: bool,
 }
 
 impl MusicPlayer {
@@ -56,11 +57,13 @@ impl MusicPlayer {
         let (_stream, stream_handle) =
             OutputStream::try_default().expect("Failed to get output stream");
         let sink = Sink::try_new(&stream_handle).expect("Failed to create audio sink");
-        sink.pause(); // Ensure sink starts paused
+        sink.pause();
         MusicPlayer {
             receiver,
             sink,
             _stream,
+            current_audio_data: None, // Initialize
+            current_sample_rate: None, // Initialize
             total_samples: 0,
             playback_start_time: None,
             samples_played_at_pause: 0,
@@ -69,46 +72,19 @@ impl MusicPlayer {
     }
 
     pub fn play_audio(&mut self, audio_data: Vec<f32>, sample_rate: u32) {
-        self.sink.stop(); // Stop and detach all current sources
-        // Note: If sink is recreated, it needs the stream_handle. For now, stop() should be enough.
+        self.sink.stop(); 
 
-        let source = SamplesBuffer::new(1, sample_rate, audio_data.clone()); // Play once
-        self.total_samples = audio_data.len() as u64;
+        // Store the audio data and sample rate
+        self.current_audio_data = Some(audio_data.clone());
+        self.current_sample_rate = Some(sample_rate);
+
+        let source = SamplesBuffer::new(1, sample_rate, audio_data);
+        self.total_samples = self.current_audio_data.as_ref().map_or(0, |d| d.len() as u64);
         self.samples_played_at_pause = 0;
-        self.playback_start_time = None; // Will be set on Resume
+        self.playback_start_time = None; 
         
         self.sink.append(source);
-        // Sink remains paused until a Resume command
     }
-
-    // Renamed and refined check_control
-    /* pub fn handle_control_messages(&mut self, sample_rate_for_progress: f32) { // Method removed
-        match self.receiver.try_recv() {
-            Ok(MusicControl::Pause) => {
-                if !self.sink.is_paused() && self.playback_start_time.is_some() {
-                    let elapsed_since_last_play = self.playback_start_time.unwrap().elapsed();
-                    self.samples_played_at_pause += (elapsed_since_last_play.as_secs_f32() * sample_rate_for_progress) as u64;
-                    self.playback_start_time = None;
-                }
-                self.sink.pause();
-            }
-            Ok(MusicControl::Resume) => {
-                if self.sink.is_paused() && self.total_samples > 0 { // Only resume if track loaded and paused
-                    self.playback_start_time = Some(Instant::now());
-                    self.sink.play();
-                }
-            }
-            Ok(MusicControl::Terminate) => {
-                self.should_terminate = true;
-                self.sink.stop();
-            }
-            Err(crossbeam_channel::TryRecvError::Empty) => { /* No message, do nothing */ }
-            Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                self.should_terminate = true;
-            }
-            _ => {}
-        }
-    } */
 
     pub fn should_continue(&self) -> bool {
         !self.should_terminate
@@ -191,12 +167,18 @@ pub fn run_music_service(initial_app_state: AppState, receiver: CrossbeamReceive
         {
             let (audio_data, sample_rate, seed) = generate_audio_from_state(&current_app_state_for_generation);
             actual_seed_for_current_song = seed;
-            player.play_audio(audio_data, sample_rate);
-            let _ = progress_sender.send(MusicProgress {
+            player.play_audio(audio_data, sample_rate); // Prepares sink, remains paused
+            let _ = progress_sender.send(MusicProgress { // Send initial state
                 current_samples: 0,
                 total_samples: player.total_samples,
                 actual_seed: actual_seed_for_current_song,
             });
+
+            // Auto-start playback for the initial track
+            if player.total_samples > 0 { // Ensure there's something to play
+                player.playback_start_time = Some(Instant::now());
+                player.sink.play();
+            }
         }
 
         'service_loop: loop {
@@ -215,6 +197,27 @@ pub fn run_music_service(initial_app_state: AppState, receiver: CrossbeamReceive
                         if player.sink.is_paused() && player.total_samples > 0 {
                             player.playback_start_time = Some(Instant::now());
                             player.sink.play();
+                        }
+                    }
+                    Ok(MusicControl::Rewind) => {
+                        if let (Some(audio_data_ref), Some(sample_rate_val)) = 
+                            (&player.current_audio_data, player.current_sample_rate) {
+                            
+                            // Clone the audio data to pass to play_audio
+                            let audio_data_clone = audio_data_ref.clone();
+                            player.play_audio(audio_data_clone, sample_rate_val);
+                            
+                            // After play_audio, the sink is paused by default, so we need to resume it.
+                            // Also, play_audio resets progress, so playback_start_time needs to be set here.
+                            player.samples_played_at_pause = 0; // Redundant as play_audio does this
+                            player.playback_start_time = Some(Instant::now()); // Set for immediate play
+                            player.sink.play(); // Start playing from the beginning
+
+                            let _ = progress_sender.send(MusicProgress {
+                                current_samples: 0,
+                                total_samples: player.total_samples,
+                                actual_seed: actual_seed_for_current_song,
+                            });
                         }
                     }
                     Ok(MusicControl::Terminate) => {

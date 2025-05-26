@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         match tui.handle_input()? {
             UserAction::Quit => {
                 if let Some(sender) = music_sender_option.take() {
-                    sender.send(MusicControl::Terminate).ok(); // send from crossbeam
+                    sender.send(MusicControl::Terminate).ok();
                 }
                 if let Some(handle) = music_service_handle.take() {
                     handle.join().expect("Failed to join music service thread");
@@ -71,13 +71,49 @@ fn main() -> Result<(), Box<dyn Error>> {
             UserAction::TogglePlayback => {
                 if let Some(sender) = &music_sender_option {
                     if tui.is_paused() { 
-                        let _ = sender.send(MusicControl::Resume); // send from crossbeam
+                        let _ = sender.send(MusicControl::Resume);
                         tui.set_playing_state(true); 
                     } else {
-                        let _ = sender.send(MusicControl::Pause); // send from crossbeam
+                        let _ = sender.send(MusicControl::Pause);
                         tui.set_playing_state(false); 
                     }
                 }
+            }
+            UserAction::RewindSong => {
+                if let Some(sender) = &music_sender_option {
+                    let _ = sender.send(MusicControl::Rewind);
+                    tui.reset_current_song_progress(); // Reset TUI progress immediately
+                    tui.set_playing_state(true);
+                }
+            }
+            UserAction::FastForwardSong => {
+                if let Some(sender) = music_sender_option.take() {
+                    let _ = sender.send(MusicControl::Terminate);
+                    if let Some(handle) = music_service_handle.take() { 
+                        handle.join().expect("Failed to join music thread for fast-forward");
+                    }
+                }
+                // Drain any lingering progress messages from the old song
+                while progress_receiver.try_recv().is_ok() {}
+
+                tui.reset_progress_for_new_song(); 
+                tui.set_current_song_id_display(None); // Clear old song ID immediately
+                let mut app_state_clone = tui.get_current_app_state();
+                app_state_clone.seed = "".to_string(); // Ensure a new random seed is used
+                // Clear progress fields in the clone to ensure gen_music_service starts fresh
+                app_state_clone.current_song_progress = 0.0;
+                app_state_clone.current_song_elapsed_secs = 0.0;
+                app_state_clone.current_song_duration_secs = 0.0;
+                
+                let (new_music_sender, new_music_receiver) = crossbeam_channel::unbounded::<MusicControl>();
+                let new_progress_sender_clone = progress_sender.clone();
+
+                music_sender_option = Some(new_music_sender.clone());
+                music_service_handle = Some(thread::spawn(move || { 
+                    gen::run_music_service(app_state_clone, new_music_receiver, new_progress_sender_clone);
+                }));
+                tui.set_playing_state(true); // Set TUI to playing
+                tui.focus_on_play_pause(); // Optional: set focus to Play/Pause
             }
             UserAction::GenerateMusic => {
                 if let Some(sender) = music_sender_option.take() {
@@ -86,21 +122,26 @@ fn main() -> Result<(), Box<dyn Error>> {
                         handle.join().expect("Failed to join music thread");
                     }
                 }
-                let app_state_clone = tui.get_current_app_state();
-                // Create new crossbeam channels for the new service
+                // Drain any lingering progress messages from the old song
+                while progress_receiver.try_recv().is_ok() {}
+
+                tui.reset_progress_for_new_song(); 
+                tui.set_current_song_id_display(None); // Clear old song ID immediately
+                let mut app_state_clone = tui.get_current_app_state(); // Make mutable
+                // Clear progress fields in the clone to ensure gen_music_service starts fresh
+                app_state_clone.current_song_progress = 0.0;
+                app_state_clone.current_song_elapsed_secs = 0.0;
+                app_state_clone.current_song_duration_secs = 0.0;
+
                 let (new_music_sender, new_music_receiver) = crossbeam_channel::unbounded::<MusicControl>();
-                let new_progress_sender_clone = progress_sender.clone(); // This is now a CrossbeamSender clone
+                let new_progress_sender_clone = progress_sender.clone(); 
 
                 music_sender_option = Some(new_music_sender.clone());
                 music_service_handle = Some(thread::spawn(move || { 
-                    // Corrected call: 3 arguments, new_music_receiver is CrossbeamReceiver, new_progress_sender_clone is CrossbeamSender
                     gen::run_music_service(app_state_clone, new_music_receiver, new_progress_sender_clone);
                 }));
                 tui.set_playing_state(true);
-                if let Some(sender) = &music_sender_option {
-                    let _ = sender.send(MusicControl::Resume);
-                }
-                tui.focus_on_play_pause(); // Set focus to Play/Pause
+                tui.focus_on_play_pause(); 
             }
             UserAction::ToggleLoop => {
                 // For now, main.rs doesn't need to do anything specific with loop state
@@ -115,15 +156,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                 } else {
                     match parse_song_id_to_app_state(&song_name_to_load) {
                         Ok(parsed_app_state) => {
-                            // Terminate existing music service if running
                             if let Some(sender) = music_sender_option.take() {
                                 sender.send(MusicControl::Terminate).ok();
                                 if let Some(handle) = music_service_handle.take() { 
                                     handle.join().expect("Failed to join music thread before loading new song");
                                 }
                             }
+                            // Drain any lingering progress messages from the old song
+                            while progress_receiver.try_recv().is_ok() {}
                             
-                            // Create new channels for the music service
+                            tui.reset_progress_for_new_song(); // Reset TUI progress for new song
+                            
                             let (new_music_sender, new_music_receiver) = crossbeam_channel::unbounded::<MusicControl>();
                             let new_progress_sender_clone = progress_sender.clone();
                             music_sender_option = Some(new_music_sender.clone());
@@ -132,11 +175,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                             music_service_handle = Some(thread::spawn(move || { 
                                 gen::run_music_service(parsed_app_state, new_music_receiver, new_progress_sender_clone);
                             }));
-                            
-                            // Send Resume command to start playback
-                            if let Some(sender) = &music_sender_option {
-                                sender.send(MusicControl::Resume).ok();
-                            }
                             
                             tui.set_current_song_id_display(Some(song_name_to_load.clone())); // Set display for loaded song
                             tui.set_playing_state(true);

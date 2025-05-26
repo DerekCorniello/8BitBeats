@@ -33,6 +33,8 @@ pub enum UserAction {
     ToggleLoop,      // Added for the loop button
     AttemptLoadSong, // Renamed from LoadAndPlaySong
     CloseSongIdErrorPopup, // To close the error popup
+    RewindSong, // Added for rewind
+    FastForwardSong, // Added for fast-forward
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -334,14 +336,35 @@ impl<B: Backend> Tui<B> {
 
     // Method to update progress
     pub fn update_progress(&mut self, current_samples: u64, total_samples: u64) {
-        if total_samples == 0 {
+        // If the TUI is in a paused state, we generally shouldn't update the elapsed time/progress percentage.
+        // However, we might still want to update the total_song_duration_secs if a new song is loaded (total_samples > 0)
+        // or if it's a reset signal (total_samples == 0).
+        if !self.state.is_playing && total_samples > 0 {
+            // If paused and this is a progress update for an actual song (not a reset signal),
+            // only update the duration if it has changed (e.g. a new song loaded paused).
+            // Do not update elapsed_secs or current_song_progress.
+            let new_duration_secs = total_samples as f32 / TUI_SAMPLE_RATE;
+            if self.state.current_song_duration_secs != new_duration_secs {
+                self.state.current_song_duration_secs = new_duration_secs;
+                // If we just loaded a song paused, progress should be 0
+                self.state.current_song_progress = 0.0;
+                self.state.current_song_elapsed_secs = 0.0;
+            }
+            return; // Explicitly stop here to not update visible progress if paused.
+        }
+
+        if total_samples == 0 { // Song ended, or was reset, or initial state.
             self.state.current_song_progress = 0.0;
             self.state.current_song_elapsed_secs = 0.0;
             self.state.current_song_duration_secs = 0.0;
         } else {
             self.state.current_song_progress = (current_samples as f32 / total_samples as f32).min(1.0).max(0.0);
             self.state.current_song_elapsed_secs = current_samples as f32 / TUI_SAMPLE_RATE;
-            self.state.current_song_duration_secs = total_samples as f32 / TUI_SAMPLE_RATE;
+            // Update duration if it's different or was zero. This handles the first progress update for a song.
+            let new_duration_secs = total_samples as f32 / TUI_SAMPLE_RATE;
+            if self.state.current_song_duration_secs == 0.0 || self.state.current_song_duration_secs != new_duration_secs {
+                self.state.current_song_duration_secs = new_duration_secs;
+            }
         }
     }
 
@@ -992,15 +1015,35 @@ impl<B: Backend> Tui<B> {
         self.state.input_mode = InputMode::SongIdErrorPopup;
     }
 
+    // Method to reset progress for the currently loaded song (e.g., on rewind)
+    pub fn reset_current_song_progress(&mut self) {
+        // Only reset the current playback position visually.
+        // The actual duration and definitive progress comes from music_service.
+        // The existing current_song_duration_secs remains, so "MM:SS / TotalDuration" looks consistent.
+        self.state.current_song_elapsed_secs = 0.0;
+        self.state.current_song_progress = 0.0;
+        self.state.is_playing = true; // Ensure playing state is true after rewind typically
+    }
+
+    // Method to reset progress completely for a new song
+    pub fn reset_progress_for_new_song(&mut self) {
+        self.update_progress(0, 0);
+        // Optionally, also ensure is_playing is set appropriately, though main.rs usually handles this.
+        // self.state.current_song_id_display = None; // Clearing ID display is handled by main.rs or progress updates
+    }
+
     // Method to handle user input
     pub fn handle_input(&mut self) -> std::io::Result<UserAction> {
-        if event::poll(std::time::Duration::from_millis(50))? {
+        if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                // self.state.status_message = None; // Optional: Clear previous status message on new input
-
-                if key.code == KeyCode::Char('q') && self.state.input_mode == InputMode::Navigation
-                {
-                    return Ok(UserAction::Quit);
+                // Global keybindings (available in any mode)
+                if key.kind == event::KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Char('q') => return Ok(UserAction::Quit),
+                        KeyCode::Char('p') => return Ok(UserAction::TogglePlayback),
+                        KeyCode::Char('l') => return Ok(UserAction::ToggleLoop),
+                        _ => {} 
+                    }
                 }
 
                 match self.state.input_mode {
@@ -1026,10 +1069,11 @@ impl<B: Backend> Tui<B> {
                                 Ok(UserAction::Navigate)
                             }
                             KeyCode::Enter => match self.current_focus {
+                                InputId::Rewind => Ok(UserAction::RewindSong),
                                 InputId::PlayPause => {
-                                    /* self.state.is_playing = !self.state.is_playing; */
                                     Ok(UserAction::TogglePlayback)
                                 }
+                                InputId::Skip => Ok(UserAction::FastForwardSong),
                                 InputId::Loop => {
                                     self.state.is_loop_enabled = !self.state.is_loop_enabled;
                                     Ok(UserAction::ToggleLoop)
