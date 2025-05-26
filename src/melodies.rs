@@ -1,6 +1,6 @@
 use dasp_signal::Signal;
 use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
+use rand::rngs::StdRng;
 use rust_music_theory::note::{Note, Notes, PitchClass};
 use rust_music_theory::scale::{Direction, Mode, Scale, ScaleType};
 
@@ -72,10 +72,10 @@ pub fn generate_melody_samples(
     octave: i8,
     rhythm_pattern: RhythmPattern,
     duration_seconds: u32,
-    bpm: u32,
+    seconds_per_quarter_note: f32,
     seed: u64,
 ) -> Vec<f32> {
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut rng = StdRng::seed_from_u64(seed);
     const SAMPLE_RATE: f32 = 44100.0;
     // Create scale
     let scale = Scale::new(
@@ -90,7 +90,7 @@ pub fn generate_melody_samples(
     let scale_notes = scale.notes();
     let mut durations: Vec<f32> = vec![];
     let mut dur_sum = 0.0;
-    let quarter_note_duration = 60.0 / bpm as f32; // Duration of one quarter note in seconds
+    // let quarter_note_duration = 60.0 / bpm as f32; // Removed, using seconds_per_quarter_note directly
                                                    // Apply rhythm pattern
     let durations = match rhythm_pattern {
         RhythmPattern::Simple => {
@@ -98,10 +98,10 @@ pub fn generate_melody_samples(
 
             // Calculate how many quarter notes fit in the total duration
             let num_quarter_notes =
-                (duration_seconds as f32 / quarter_note_duration).floor() as usize; // Number of full quarter notes
+                (duration_seconds as f32 / seconds_per_quarter_note).floor() as usize; // Number of full quarter notes
 
             // Create a vector filled with quarter note durations
-            let durations: Vec<f32> = vec![quarter_note_duration; num_quarter_notes];
+            let durations: Vec<f32> = vec![seconds_per_quarter_note; num_quarter_notes];
             durations
         }
         RhythmPattern::Medium => {
@@ -109,13 +109,13 @@ pub fn generate_melody_samples(
 
             while dur_sum < duration_seconds as f32 {
                 // 50% chance of quarter note, 50% chance of eighth note
-                let duration = if rng.random::<bool>() {
-                    1.0 * quarter_note_duration
+                let actual_duration = if rng.random::<bool>() { // Changed to rng.random()
+                    1.0 * seconds_per_quarter_note
                 } else {
-                    0.5 * quarter_note_duration
+                    0.5 * seconds_per_quarter_note
                 };
-                durations.push(duration);
-                dur_sum += duration;
+                durations.push(actual_duration);
+                dur_sum += actual_duration;
             }
 
             durations
@@ -124,58 +124,71 @@ pub fn generate_melody_samples(
             // Mix of quarter, eighth, and sixteenth notes
             while dur_sum < duration_seconds as f32 {
                 // 25% quarter, 50% eighth, 25% sixteenth
-                let roll = rng.random::<f32>();
-                let duration = if roll < 0.25 {
+                let roll = rng.random::<f32>(); // Changed to rng.random()
+                let beat_multiplier = if roll < 0.25 {
                     1.0 // quarter
                 } else if roll < 0.75 {
                     0.5 // eighth
                 } else {
                     0.25 // sixteenth
                 };
-                dur_sum += duration * quarter_note_duration;
-                durations.push(duration);
+                let actual_duration = beat_multiplier * seconds_per_quarter_note;
+                dur_sum += actual_duration;
+                durations.push(actual_duration); // Push actual duration in seconds
             }
 
             durations
         }
         RhythmPattern::Swung => {
             // Mix of quarter and eighth notes
+            // Ensure this loop also respects total duration_seconds
+            dur_sum = 0.0; // Reset dur_sum for this pattern
+            while dur_sum < duration_seconds as f32 {
+                let dur1 = 0.66 * seconds_per_quarter_note;
+                if dur_sum + dur1 > duration_seconds as f32 { break; }
+                durations.push(dur1);
+                dur_sum += dur1;
 
-            for _ in 0..(duration_seconds as f32 / quarter_note_duration) as i32 {
-                durations.push(0.66 * quarter_note_duration);
-                durations.push(0.34 * quarter_note_duration);
-                dur_sum = 0.0;
+                let dur2 = 0.34 * seconds_per_quarter_note;
+                if dur_sum + dur2 > duration_seconds as f32 { break; }
+                durations.push(dur2);
+                dur_sum += dur2;
             }
-
             durations
         }
 
         RhythmPattern::Syncopated => {
             // Syncopated rhythm with some off-beat notes
-            let mut durations = vec![];
+            // let mut durations = vec![]; // durations is already mutably borrowed
 
             // counts if beat is on beat or off beat
             let mut i = 0;
+            dur_sum = 0.0; // Reset dur_sum for this pattern
             while dur_sum < duration_seconds as f32 {
-                let duration = if i % 2 == 0 {
+                let beat_multiplier = if i % 2 == 0 {
                     // On-beat notes are usually shorter
-                    if rng.random::<bool>() {
+                    if rng.random::<bool>() { // Changed to rng.random()
                         0.5
                     } else {
                         0.25
                     }
                 } else {
                     // Off-beat notes are usually longer
-                    if rng.random::<bool>() {
+                    if rng.random::<bool>() { // Changed to rng.random()
                         1.0
                     } else {
                         0.75
                     }
                 };
-
-                dur_sum += duration * quarter_note_duration;
+                let actual_duration = beat_multiplier * seconds_per_quarter_note;
+                
+                if dur_sum + actual_duration > duration_seconds as f32 && !durations.is_empty() {
+                    // Avoid adding a note that grossly exceeds total duration, unless it's the first note
+                    break;
+                }
+                dur_sum += actual_duration;
                 i += 1;
-                durations.push(duration);
+                durations.push(actual_duration); // Push actual duration in seconds
             }
 
             durations
@@ -230,9 +243,9 @@ pub fn generate_melody_samples(
         let note = scale_notes[prev_note_idx].clone();
 
         // Determine octave (occasionally jump octaves for variety)
-        let note_octave = if rng.random::<f32>() < 0.05 {
+        let note_octave = if rng.random::<f32>() < 0.05 { // Changed to rng.random()
             // 10% chance to jump octave
-            if rng.random::<bool>() {
+            if rng.random::<bool>() { // Changed to rng.random()
                 octave + 1
             } else {
                 octave - 1
@@ -261,7 +274,7 @@ pub fn generate_melody_samples(
         let mut note_signal = dasp_signal::rate(SAMPLE_RATE as f64)
             .const_hz(frequency as f64)
             .square()
-            .map(|x| (x * 0.3) as f32); // Half amplitude to prevent distortion
+            .map(|x| (x * 0.5) as f32); // Half amplitude to prevent distortion
 
         // Add the sound part
         for _ in 0..sound_samples {
@@ -276,10 +289,11 @@ pub fn generate_melody_samples(
 }
 
 /// Generate a melody that fits a specific chord progression style
-pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32, seed: u64) -> Vec<f32> {
+pub fn get_melody(style: &str, root: u8, duration: u32, seconds_per_quarter_note: f32, seed: u64) -> Vec<f32> { // Changed bpm to seconds_per_quarter_note
     let root_pitch = semitone_to_pitch(root);
+    let mut rng = StdRng::seed_from_u64(seed); // Changed from ChaCha8Rng. Initialize RNG here for consistent choices
 
-    match style {
+    match style.to_lowercase().as_str() { // Added to_lowercase for consistency with gen.rs
         "blues" => {
             // Blues uses pentatonic minor scale typically
             generate_melody_samples(
@@ -289,7 +303,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32, seed: u64) -> 
                 3,                         // Middle octave
                 RhythmPattern::Syncopated, // Blues has syncopated rhythm
                 duration,
-                bpm,
+                seconds_per_quarter_note, // Pass seconds_per_quarter_note
                 seed,
             )
         }
@@ -302,13 +316,13 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32, seed: u64) -> 
                 3,                     // Middle octave
                 RhythmPattern::Medium, // Pop usually has straightforward rhythm
                 duration,
-                bpm,
+                seconds_per_quarter_note, // Pass seconds_per_quarter_note
                 seed,
             )
         }
         "jazz" => {
             // Jazz often uses Dorian or Mixolydian scales
-            let jazz_mode = if rand::rng().random::<bool>() {
+            let jazz_mode = if rng.random::<bool>() { // Use the seeded rng
                 Mode::Dorian
             } else {
                 Mode::Mixolydian
@@ -321,7 +335,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32, seed: u64) -> 
                 3,                      // Middle octave
                 RhythmPattern::Complex, // Jazz has complex rhythms
                 duration,
-                bpm,
+                seconds_per_quarter_note, // Pass seconds_per_quarter_note
                 seed,
             )
         }
@@ -334,7 +348,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, bpm: u32, seed: u64) -> 
                 3,            // Middle octave
                 RhythmPattern::Simple,
                 duration,
-                bpm,
+                seconds_per_quarter_note, // Pass seconds_per_quarter_note
                 seed,
             )
         }
@@ -348,8 +362,8 @@ pub fn create_custom_melody(
     mode: &str,
     octave: i8,
     rhythm: &str,
-    duration: f32,
-    bpm: u32,
+    duration_total_seconds: f32, // Renamed for clarity
+    seconds_per_quarter_note: f32, // Changed from bpm
     seed: u64,
 ) -> Vec<f32> {
     let root_pitch = semitone_to_pitch(root);
@@ -390,8 +404,8 @@ pub fn create_custom_melody(
         mode,
         octave,
         rhythm_pattern,
-        duration as u32,
-        bpm,
+        duration_total_seconds as u32, // Use the passed total duration
+        seconds_per_quarter_note, // Pass seconds_per_quarter_note
         seed,
     )
 }

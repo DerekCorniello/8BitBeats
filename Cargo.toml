@@ -1,16 +1,19 @@
 [package]
-name = "eight-bit-beats"
-version = "0.0.1"
+name = "eightbitbeats"
+version = "0.1.0"
 edition = "2021"
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
 [dependencies]
-crossterm = "0.28.1"
-cpal = "0.15.3"
-dasp_signal = "0.11.0"
-ratatui = "0.29.0"
-rodio = "0.20.1"
-rust-music-theory = "0.2.0"
-serde = "1.0.217"
-serde_json = "1.0.138"
+rodio = "0.17.3"
 rand = "0.9.0"
-rand_chacha = "0.9.0"
+rand_pcg = "0.3"
+crossterm = "0.27.0"
+ratatui = { version = "0.26.1", features = ["all-widgets"] }
+dasp_signal = "0.11.0"
+rust-music-theory = "0.2.0"
+rand_chacha = "0.3.1" # Corrected version
+crossbeam-channel = "0.5"
+
+# Removed tonic and prost dependencies as they are not used.

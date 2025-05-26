@@ -94,15 +94,15 @@ pub fn generate_chord_samples(
     let mut note_generators: Vec<_> = note_frequencies
         .iter()
         .map(|&freq| {
-            dasp_signal::rate(sample_rate as f64) // Set the sample rate
-                .const_hz(freq as f64) // Create a constant frequency
-                .square() // Generate a sine wave
-                .map(|x| (x * 0.1) as f32) // Reduce amplitude to avoid distortion
+            dasp_signal::rate(sample_rate as f64)
+                .const_hz(freq as f64)
+                .sine()
+                .map(|x| (x * 0.4) as f32) // Increased initial amplitude to 0.4
         })
         .collect();
 
     // Calculate the total number of samples needed
-    let total_samples = sample_rate as usize * duration_seconds as usize;
+    let total_samples = (sample_rate as f32 * duration_seconds) as usize;
     let mut chord_samples = Vec::with_capacity(total_samples);
 
     // Combine samples from all notes to create the chord sound
@@ -117,170 +117,65 @@ pub fn generate_chord_samples(
     chord_samples
 }
 
-/// Mix multiple sample vectors together.
-/// This combines multiple sounds with different volumes.
-pub fn mix_samples(sample_collections: Vec<Vec<f32>>, volume_levels: &[f32]) -> Vec<f32> {
-    // Return empty vector if there's nothing to mix
-    if sample_collections.is_empty() {
-        return Vec::new();
-    }
-
-    // Find the longest sample vector
-    let max_length = sample_collections.iter().map(|s| s.len()).max().unwrap();
-    let mut combined_samples = vec![0.0; max_length];
-
-    // Mix all samples together with their respective volumes
-    for (i, samples) in sample_collections.iter().enumerate() {
-        // Get the volume level for this sample set (default to 1.0)
-        let volume = *volume_levels.get(i).unwrap_or(&1.0);
-
-        // Add each sample multiplied by its volume
-        for (j, &sample) in samples.iter().enumerate() {
-            if j < max_length {
-                combined_samples[j] += sample * volume;
-            }
-        }
-    }
-
-    // Normalize the result to prevent distortion
-    let max_amplitude = combined_samples.iter().map(|s| s.abs()).fold(0.0, f32::max);
-    if max_amplitude > 1.0 {
-        for sample in &mut combined_samples {
-            *sample /= max_amplitude;
-        }
-    }
-
-    combined_samples
-}
-
 /// Get a PitchClass from a numeric value
 pub fn get_pitch(root: u8) -> PitchClass {
     PitchClass::from_numeric(root)
 }
 
 /// Get a chord progression by name
-pub fn get_progression(prog_name: String, root: u8, chord_duration: f32) -> Vec<Vec<f32>> {
+pub fn get_progression(prog_name: String, root: u8, chord_duration: f32) -> (Vec<Vec<f32>>, Vec<u8>) {
     let sample_rate = 44100; // Standard CD-quality audio
+    let mut chord_samples_list = Vec::new();
+    let mut root_notes_list = Vec::new();
 
-    match prog_name.as_str() {
+    // Define a helper closure to generate chord and collect root note
+    let mut add_chord = |current_root_offset: u8, quality: ChordQuality, number: ChordNumber| {
+        let absolute_root = root + current_root_offset;
+        // Convert to MIDI note: C4 (MIDI 60) is a common middle C.
+        // Our `root` (0-11) + `absolute_root` (relative to root)
+        // To make it concrete, let's assume the `root` from UI corresponds to an octave (e.g. octave 3 or 4).
+        // The `PitchClass::from_numeric(absolute_root)` handles wrapping around 12.
+        // The `chord.notes()` then uses an octave (defaulting to 4 if not specified or derived).
+        // Let's ensure our `absolute_root` for bass is a MIDI note number.
+        // The `Note` struct in `rust-music-theory` uses octave numbers. C4 is `PitchClass::C` at `octave: 4`.
+        // `note_to_midi` converts `Note` to MIDI. `(note.octave as i32 + 1) * 12 + semitone`
+        // If `PitchClass::C` (semitone 0) is at octave 4, MIDI is (4+1)*12 + 0 = 60.
+        // So `get_pitch(absolute_root)` is fine for `generate_chord_samples` as it expects `PitchClass`.
+        // For the bass line, we need a consistent MIDI note. Let's use octave 3 for chord roots.
+        // The `root` (0-11) from UI + `current_root_offset`. Bass will be octave 2.
+        let chord_root_midi = root + current_root_offset + 12 * 3; // Assuming octave 3 for chord root
+        root_notes_list.push(chord_root_midi);
+        chord_samples_list.push(generate_chord_samples(
+            get_pitch(absolute_root), // This is fine, uses the 0-11 pitch class
+            quality,
+            number,
+            chord_duration,
+            sample_rate,
+        ));
+    };
+
+    match prog_name.to_lowercase().as_str() {
         "blues" => {
-            vec![
-                // I chord
-                generate_chord_samples(
-                    get_pitch(root),
-                    ChordQuality::Major,
-                    ChordNumber::Triad,
-                    chord_duration,
-                    sample_rate,
-                ),
-                // IV chord
-                generate_chord_samples(
-                    get_pitch(root + 5), // Perfect fourth up from root
-                    ChordQuality::Major,
-                    ChordNumber::Triad,
-                    chord_duration,
-                    sample_rate,
-                ),
-                // V chord
-                generate_chord_samples(
-                    get_pitch(root + 7), // Perfect fifth up from root
-                    ChordQuality::Major,
-                    ChordNumber::Triad,
-                    chord_duration,
-                    sample_rate,
-                ),
-                // IV chord again
-                generate_chord_samples(
-                    get_pitch(root + 5),
-                    ChordQuality::Major,
-                    ChordNumber::Triad,
-                    chord_duration,
-                    sample_rate,
-                ),
-            ]
+            add_chord(0, ChordQuality::Major, ChordNumber::Triad);    // I
+            add_chord(5, ChordQuality::Major, ChordNumber::Triad);    // IV
+            add_chord(7, ChordQuality::Major, ChordNumber::Triad);    // V
+            add_chord(5, ChordQuality::Major, ChordNumber::Triad);    // IV
         }
         "pop" => {
-            vec![
-                // I chord
-                generate_chord_samples(
-                    get_pitch(root),
-                    ChordQuality::Major,
-                    ChordNumber::Triad,
-                    chord_duration,
-                    sample_rate,
-                ),
-                // V chord
-                generate_chord_samples(
-                    get_pitch(root + 7),
-                    ChordQuality::Major,
-                    ChordNumber::Triad,
-                    chord_duration,
-                    sample_rate,
-                ),
-                // vi chord
-                generate_chord_samples(
-                    get_pitch(root + 9),
-                    ChordQuality::Minor,
-                    ChordNumber::Triad,
-                    chord_duration,
-                    sample_rate,
-                ),
-                // IV chord
-                generate_chord_samples(
-                    get_pitch(root + 5),
-                    ChordQuality::Major,
-                    ChordNumber::Triad,
-                    chord_duration,
-                    sample_rate,
-                ),
-            ]
+            add_chord(0, ChordQuality::Major, ChordNumber::Triad);    // I
+            add_chord(7, ChordQuality::Major, ChordNumber::Triad);    // V
+            add_chord(9, ChordQuality::Minor, ChordNumber::Triad);    // vi
+            add_chord(5, ChordQuality::Major, ChordNumber::Triad);    // IV
         }
         "jazz" => {
-            vec![
-                // ii chord (minor 7th)
-                generate_chord_samples(
-                    get_pitch(root + 2),
-                    ChordQuality::Minor,
-                    ChordNumber::Seventh,
-                    chord_duration,
-                    sample_rate,
-                ),
-                // V chord (dominant 7th)
-                generate_chord_samples(
-                    get_pitch(root + 7),
-                    ChordQuality::Dominant,
-                    ChordNumber::Seventh,
-                    chord_duration,
-                    sample_rate,
-                ),
-                // I chord (major 7th)
-                generate_chord_samples(
-                    get_pitch(root),
-                    ChordQuality::Major,
-                    ChordNumber::Seventh,
-                    chord_duration,
-                    sample_rate,
-                ),
-            ]
+            add_chord(2, ChordQuality::Minor, ChordNumber::Seventh);  // ii
+            add_chord(7, ChordQuality::Dominant, ChordNumber::Seventh);// V
+            add_chord(0, ChordQuality::Major, ChordNumber::Seventh);  // I
         }
-        // Default to a simple I-IV progression if the name doesn't match
-        _ => {
-            vec![
-                generate_chord_samples(
-                    get_pitch(root),
-                    ChordQuality::Major,
-                    ChordNumber::Triad,
-                    chord_duration,
-                    sample_rate,
-                ),
-                generate_chord_samples(
-                    get_pitch(root + 5),
-                    ChordQuality::Major,
-                    ChordNumber::Triad,
-                    chord_duration,
-                    sample_rate,
-                ),
-            ]
+        _ => { // Default to a simple I-IV progression
+            add_chord(0, ChordQuality::Major, ChordNumber::Triad);    // I
+            add_chord(5, ChordQuality::Major, ChordNumber::Triad);    // IV
         }
     }
+    (chord_samples_list, root_notes_list)
 }
