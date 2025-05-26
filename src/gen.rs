@@ -30,6 +30,7 @@ pub enum MusicControl {
     Pause,
     Resume,
     Terminate,
+    // LoadAndPlaySongId(String), // Removed as it's no longer used
 }
 
 // New struct for progress updates
@@ -81,7 +82,7 @@ impl MusicPlayer {
     }
 
     // Renamed and refined check_control
-    pub fn handle_control_messages(&mut self, sample_rate_for_progress: f32) {
+    /* pub fn handle_control_messages(&mut self, sample_rate_for_progress: f32) { // Method removed
         match self.receiver.try_recv() {
             Ok(MusicControl::Pause) => {
                 if !self.sink.is_paused() && self.playback_start_time.is_some() {
@@ -104,111 +105,214 @@ impl MusicPlayer {
             Err(crossbeam_channel::TryRecvError::Empty) => { /* No message, do nothing */ }
             Err(crossbeam_channel::TryRecvError::Disconnected) => {
                 self.should_terminate = true;
-                // Optionally log or handle this case, e.g. if main thread panicked
             }
+            _ => {}
         }
-    }
+    } */
 
     pub fn should_continue(&self) -> bool {
         !self.should_terminate
     }
 }
 
+// Internal function to generate audio based on AppState
+// Returns (audio_data, sample_rate, actual_seed_used)
+fn generate_audio_from_state(app_state: &AppState) -> (Vec<f32>, u32, u64) { 
+    const SAMPLE_RATE_AUDIO_GEN: u32 = 44100;
+
+    let root_note = match app_state.scale.to_owned().as_str() {
+        "C" => 0, "C#" => 1, "D" => 2, "D#" => 3, "E" => 4, "F" => 5,
+        "F#" => 6, "G" => 7, "G#" => 8, "A" => 9, "A#" => 10, "B" => 11,
+        _ => 0, // Default to C
+    };
+    let duration_minutes = app_state.length.split_whitespace().next().unwrap_or("5").parse::<f32>().unwrap_or(5.0);
+    let duration_seconds = duration_minutes * 60.0;
+    let style = app_state.style.as_str();
+    
+    // Determine the actual seed to be used for generation
+    let actual_generated_seed = app_state.seed.parse::<u64>().unwrap_or_else(|_| {
+        // If seed string is empty or invalid, generate a truly random u64 seed value
+        rand::random::<u64>() 
+    });
+    let mut rng = StdRng::seed_from_u64(actual_generated_seed);
+    
+    let bpm_str = app_state.bpm.as_str();
+    let bpm = match bpm_str.parse::<u32>() {
+        Ok(val) if !bpm_str.is_empty() && val > 0 => val, 
+        _ => rng.gen_range(80..=160), // Corrected based on rand docs, will see if compiler still complains
+    };
+
+    let sec_per_beat: f32 = 60.0 / bpm as f32;
+    let num_beats_per_chord = rng.gen_range(2..=4); // Corrected based on rand docs
+    let chord_duration: f32 = num_beats_per_chord as f32 * sec_per_beat;
+    let samples_per_chord = (chord_duration * SAMPLE_RATE_AUDIO_GEN as f32) as usize;
+
+    // Call get_melody and get_bass_line with their original signatures (no &mut rng)
+    let melody = melodies::get_melody(style, root_note, duration_seconds as u32, sec_per_beat, actual_generated_seed);
+    let (chord_sequence, chord_root_notes) = match style.to_lowercase().as_str() {
+        "blues" => play_progression(String::from("blues"), root_note, chord_duration),
+        "pop" => play_progression(String::from("pop"), root_note, chord_duration),
+        "jazz" => play_progression(String::from("jazz"), root_note, chord_duration),
+        _ => play_progression(String::from("default"), root_note, chord_duration),
+    };
+    let melody_len = melody.len();
+    let chord_len = chord_sequence.len(); 
+    let target_len = melody_len; 
+    let bass_line = bass::get_bass_line(style, &chord_root_notes, samples_per_chord, target_len, bpm, actual_generated_seed);
+    
+    let mut mixed_audio = Vec::with_capacity(target_len);
+    let chord_gain = 0.5; let melody_gain = 0.125; let bass_gain = 0.6;
+    for i in 0..target_len {
+        let chord_sample_val = if chord_len > 0 { chord_sequence.get(i % chord_len).copied().unwrap_or(0.0) * chord_gain } else { 0.0 };
+        let melody_sample_val = melody.get(i).copied().unwrap_or(0.0) * melody_gain;
+        let bass_sample_val = bass_line.get(i).copied().unwrap_or(0.0) * bass_gain;
+        mixed_audio.push(melody_sample_val + chord_sample_val + bass_sample_val);
+    }
+    if !mixed_audio.is_empty() {
+        let max_abs_val = mixed_audio.iter().fold(0.0f32, |max, &val| max.max(val.abs()));
+        if max_abs_val > 1.0 { 
+            for sample in &mut mixed_audio { *sample /= max_abs_val; } 
+        }
+    }
+    
+    (mixed_audio, SAMPLE_RATE_AUDIO_GEN, actual_generated_seed)
+}
+
 // This is the main function that will be called to start music playback in a thread
-pub fn run_music_service(app_state: AppState, receiver: CrossbeamReceiver<MusicControl>, progress_sender: CrossbeamSender<MusicProgress>) {
-    const SAMPLE_RATE_AUDIO_GEN: u32 = 44100; // For audio generation
+pub fn run_music_service(initial_app_state: AppState, receiver: CrossbeamReceiver<MusicControl>, progress_sender: CrossbeamSender<MusicProgress>) {
     const SAMPLE_RATE_PROGRESS: f32 = 44100.0; // For progress calculation (as f32)
 
     thread::spawn(move || {
         let mut player = MusicPlayer::new(receiver);
+        let current_app_state_for_generation = initial_app_state;
+        let actual_seed_for_current_song: u64;
 
-        // --- Audio Generation (copied from previous state, ensures it's all here) ---
-        let root_note = match app_state.scale.to_owned().as_str() {
-            "C" => 0, "C#" => 1, "D" => 2, "D#" => 3, "E" => 4, "F" => 5,
-            "F#" => 6, "G" => 7, "G#" => 8, "A" => 9, "A#" => 10, "B" => 11,
-            _ => 0,
-        };
-        let duration_minutes = app_state.length.split_whitespace().next().unwrap_or("5").parse::<f32>().unwrap_or(5.0);
-        let duration_seconds = duration_minutes * 60.0;
-        let style = app_state.style.as_str();
-        
-        // This is the actual seed used for generation
-        let actual_generated_seed = str::parse::<u64>(app_state.seed.as_str()).unwrap_or_else(|_| rand::random::<u64>());
-        let mut rng = StdRng::seed_from_u64(actual_generated_seed);
-        
-        let bpm_str = app_state.bpm.as_str();
-        let bpm = match str::parse::<u32>(bpm_str) {
-            Ok(val) if bpm_str != "120" => val, 
-            _ => rng.random_range(80..=160),
-        };
-        let sec_per_beat: f32 = 60.0 / bpm as f32;
-        let num_beats_per_chord = rng.random_range(2..=4);
-        let chord_duration: f32 = num_beats_per_chord as f32 * sec_per_beat;
-        let samples_per_chord = (chord_duration * SAMPLE_RATE_AUDIO_GEN as f32) as usize;
-        let melody = melodies::get_melody(style, root_note, duration_seconds as u32, sec_per_beat, actual_generated_seed);
-        let (chord_sequence, chord_root_notes) = match style.to_lowercase().as_str() {
-            "blues" => play_progression(String::from("blues"), root_note, chord_duration),
-            "pop" => play_progression(String::from("pop"), root_note, chord_duration),
-            "jazz" => play_progression(String::from("jazz"), root_note, chord_duration),
-            _ => play_progression(String::from("default"), root_note, chord_duration),
-        };
-        let melody_len = melody.len();
-        let chord_len = chord_sequence.len(); 
-        let target_len = melody_len; 
-        let bass_line = bass::get_bass_line(style, &chord_root_notes, samples_per_chord, target_len, bpm, actual_generated_seed);
-        let mut mixed_audio = Vec::with_capacity(target_len);
-        let chord_gain = 0.5; let melody_gain = 0.125; let bass_gain = 0.6;
-        for i in 0..target_len {
-            let chord_sample_val = if chord_len > 0 { chord_sequence.get(i % chord_len).copied().unwrap_or(0.0) * chord_gain } else { 0.0 };
-            let melody_sample_val = melody.get(i).copied().unwrap_or(0.0) * melody_gain;
-            let bass_sample_val = bass_line.get(i).copied().unwrap_or(0.0) * bass_gain;
-            mixed_audio.push(melody_sample_val + chord_sample_val + bass_sample_val);
+        // Initial audio generation based on initial_app_state
+        {
+            let (audio_data, sample_rate, seed) = generate_audio_from_state(&current_app_state_for_generation);
+            actual_seed_for_current_song = seed;
+            player.play_audio(audio_data, sample_rate);
+            let _ = progress_sender.send(MusicProgress {
+                current_samples: 0,
+                total_samples: player.total_samples,
+                actual_seed: actual_seed_for_current_song,
+            });
         }
-        let max_abs_val = mixed_audio.iter().fold(0.0f32, |max, &val| max.max(val.abs()));
-        if max_abs_val > 1.0 { for sample in &mut mixed_audio { *sample /= max_abs_val; } }
-        // --- End Audio Generation ---
 
-        player.play_audio(mixed_audio, SAMPLE_RATE_AUDIO_GEN);
+        'service_loop: loop {
+            // Process all pending control messages first
+            loop {
+                match player.receiver.try_recv() {
+                    Ok(MusicControl::Pause) => {
+                        if !player.sink.is_paused() && player.playback_start_time.is_some() {
+                            let elapsed_since_last_play = player.playback_start_time.unwrap().elapsed();
+                            player.samples_played_at_pause += (elapsed_since_last_play.as_secs_f32() * SAMPLE_RATE_PROGRESS) as u64;
+                            player.playback_start_time = None;
+                        }
+                        player.sink.pause();
+                    }
+                    Ok(MusicControl::Resume) => {
+                        if player.sink.is_paused() && player.total_samples > 0 {
+                            player.playback_start_time = Some(Instant::now());
+                            player.sink.play();
+                        }
+                    }
+                    Ok(MusicControl::Terminate) => {
+                        player.should_terminate = true;
+                        player.sink.stop();
+                        break 'service_loop; 
+                    }
+                    Err(crossbeam_channel::TryRecvError::Empty) => {
+                        break; // No more messages, exit inner message loop
+                    }
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                        player.should_terminate = true;
+                        break 'service_loop; 
+                    }
+                }
+            }
 
-        // Main loop for the music player thread
-        while player.should_continue() {
-            player.handle_control_messages(SAMPLE_RATE_PROGRESS);
+            if !player.should_continue() { 
+                break 'service_loop;
+            }
 
-            // Progress Reporting
-            if player.total_samples > 0 && !player.should_terminate { // Check !should_terminate here too
+            // Progress Reporting (logic remains largely the same)
+            if player.total_samples > 0 && !player.should_terminate {
                 let mut current_display_samples = player.samples_played_at_pause;
                 if !player.sink.is_paused() && player.playback_start_time.is_some() {
                     let elapsed_since_current_play = player.playback_start_time.unwrap().elapsed();
                     current_display_samples += (elapsed_since_current_play.as_secs_f32() * SAMPLE_RATE_PROGRESS) as u64;
                 }
-
                 current_display_samples = current_display_samples.min(player.total_samples);
 
                 let send_result = progress_sender.send(MusicProgress {
                     current_samples: current_display_samples,
                     total_samples: player.total_samples,
-                    actual_seed: actual_generated_seed, // Pass the seed here
+                    actual_seed: actual_seed_for_current_song, 
                 });
                 if send_result.is_err() {
-                    // Receiver likely dropped (e.g. main thread exited), so terminate music service
-                    player.should_terminate = true;
+                    player.should_terminate = true; 
                 }
 
-                // If song finished playing naturally
                 if current_display_samples >= player.total_samples && !player.sink.is_paused() {
-                    player.sink.pause(); // Stop playback by pausing
+                    player.sink.pause(); 
                     player.playback_start_time = None;
-                    // samples_played_at_pause would have been updated to near total_samples by the pause logic 
-                    // if a Pause command was sent, or it's already reflecting played samples.
-                    // For a natural end, current_display_samples is total_samples.
-                    // To ensure the final progress report shows 100% and then it stops reporting active play:
-                    player.samples_played_at_pause = player.total_samples; // Ensure it reflects full play for next potential (paused) report
+                    player.samples_played_at_pause = player.total_samples; 
                 }
             }
-
-            thread::sleep(Duration::from_millis(100)); // Progress update interval
+            thread::sleep(Duration::from_millis(100)); 
         }
     });
+}
+
+// Function to parse a song ID string into an AppState
+pub fn parse_song_id_to_app_state(id_string: &str) -> Result<AppState, String> {
+    let parts: Vec<&str> = id_string.split('-').collect();
+    if parts.len() != 5 {
+        return Err(format!(
+            "Invalid Song ID: Expected 5 parts separated by '-'. Got {}. Format: Scale-Style-BPM-LengthInMinutes-Seed", 
+            parts.len()
+        ));
+    }
+
+    let scale = parts[0].to_string();
+    let style = parts[1].to_string();
+    let bpm_str = parts[2].to_string();
+    let length_minutes_str = parts[3];
+    let seed_str = parts[4].to_string();
+
+    if bpm_str.parse::<u32>().is_err() && !bpm_str.is_empty() {
+        return Err(format!(
+            "Invalid BPM in Song ID: '{}' is not a valid number. Format: Scale-Style-BPM-LengthInMinutes-Seed", 
+            bpm_str
+        ));
+    }
+
+    let length_in_mins = match length_minutes_str.parse::<u32>() {
+        Ok(mins) => format!("{} min", mins),
+        Err(_) => {
+            return Err(format!(
+                "Invalid Length in Song ID: '{}' is not a valid number of minutes. Format: Scale-Style-BPM-LengthInMinutes-Seed", 
+                length_minutes_str
+            ));
+        }
+    };
+
+    if seed_str.parse::<u64>().is_err() && !seed_str.is_empty() {
+       return Err(format!(
+           "Invalid Seed in Song ID: '{}' is not a valid number. Format: Scale-Style-BPM-LengthInMinutes-Seed", 
+           seed_str
+        ));
+    }
+
+    let mut app_state = AppState::default();
+    app_state.scale = scale;
+    app_state.style = style;
+    app_state.bpm = bpm_str; 
+    app_state.length = length_in_mins;
+    app_state.seed = seed_str; 
+
+    Ok(app_state)
 }
 
 

@@ -61,7 +61,6 @@ pub enum RhythmPattern {
     Complex,
     // Syncopated rhythm with some off-beat notes
     Syncopated,
-    Swung,
 }
 
 /// Generate melody samples based on given parameters
@@ -109,7 +108,7 @@ pub fn generate_melody_samples(
 
             while dur_sum < duration_seconds as f32 {
                 // 50% chance of quarter note, 50% chance of eighth note
-                let actual_duration = if rng.random::<bool>() { // Changed to rng.random()
+                let actual_duration = if rng.gen::<bool>() { // CORRECTED
                     1.0 * seconds_per_quarter_note
                 } else {
                     0.5 * seconds_per_quarter_note
@@ -124,7 +123,7 @@ pub fn generate_melody_samples(
             // Mix of quarter, eighth, and sixteenth notes
             while dur_sum < duration_seconds as f32 {
                 // 25% quarter, 50% eighth, 25% sixteenth
-                let roll = rng.random::<f32>(); // Changed to rng.random()
+                let roll = rng.gen::<f32>(); // CORRECTED
                 let beat_multiplier = if roll < 0.25 {
                     1.0 // quarter
                 } else if roll < 0.75 {
@@ -139,24 +138,6 @@ pub fn generate_melody_samples(
 
             durations
         }
-        RhythmPattern::Swung => {
-            // Mix of quarter and eighth notes
-            // Ensure this loop also respects total duration_seconds
-            dur_sum = 0.0; // Reset dur_sum for this pattern
-            while dur_sum < duration_seconds as f32 {
-                let dur1 = 0.66 * seconds_per_quarter_note;
-                if dur_sum + dur1 > duration_seconds as f32 { break; }
-                durations.push(dur1);
-                dur_sum += dur1;
-
-                let dur2 = 0.34 * seconds_per_quarter_note;
-                if dur_sum + dur2 > duration_seconds as f32 { break; }
-                durations.push(dur2);
-                dur_sum += dur2;
-            }
-            durations
-        }
-
         RhythmPattern::Syncopated => {
             // Syncopated rhythm with some off-beat notes
             // let mut durations = vec![]; // durations is already mutably borrowed
@@ -167,14 +148,14 @@ pub fn generate_melody_samples(
             while dur_sum < duration_seconds as f32 {
                 let beat_multiplier = if i % 2 == 0 {
                     // On-beat notes are usually shorter
-                    if rng.random::<bool>() { // Changed to rng.random()
+                    if rng.gen::<bool>() { // CORRECTED
                         0.5
                     } else {
                         0.25
                     }
                 } else {
                     // Off-beat notes are usually longer
-                    if rng.random::<bool>() { // Changed to rng.random()
+                    if rng.gen::<bool>() { // CORRECTED
                         1.0
                     } else {
                         0.75
@@ -243,9 +224,9 @@ pub fn generate_melody_samples(
         let note = scale_notes[prev_note_idx].clone();
 
         // Determine octave (occasionally jump octaves for variety)
-        let note_octave = if rng.random::<f32>() < 0.05 { // Changed to rng.random()
-            // 10% chance to jump octave
-            if rng.random::<bool>() { // Changed to rng.random()
+        let note_octave = if rng.gen::<f32>() < 0.05 { // CORRECTED
+            // 10% chance to jump octave, corrected to 5%
+            if rng.gen::<bool>() { // CORRECTED
                 octave + 1
             } else {
                 octave - 1
@@ -322,7 +303,7 @@ pub fn get_melody(style: &str, root: u8, duration: u32, seconds_per_quarter_note
         }
         "jazz" => {
             // Jazz often uses Dorian or Mixolydian scales
-            let jazz_mode = if rng.random::<bool>() { // Use the seeded rng
+            let jazz_mode = if rng.gen::<bool>() { // Use the seeded rng
                 Mode::Dorian
             } else {
                 Mode::Mixolydian
@@ -353,59 +334,4 @@ pub fn get_melody(style: &str, root: u8, duration: u32, seconds_per_quarter_note
             )
         }
     }
-}
-
-/// Create a melody based on a specific scale with customizable parameters
-pub fn create_custom_melody(
-    root: u8,
-    scale_type: &str,
-    mode: &str,
-    octave: i8,
-    rhythm: &str,
-    duration_total_seconds: f32, // Renamed for clarity
-    seconds_per_quarter_note: f32, // Changed from bpm
-    seed: u64,
-) -> Vec<f32> {
-    let root_pitch = semitone_to_pitch(root);
-
-    // Parse scale type
-    let scale_type = match scale_type.to_lowercase().as_str() {
-        "diatonic" => ScaleType::Diatonic,
-        "melodic_minor" => ScaleType::MelodicMinor,
-        "harmonic_minor" => ScaleType::HarmonicMinor,
-        _ => ScaleType::Diatonic, // Default to diatonic
-    };
-
-    // Parse mode
-    let mode = match mode.to_lowercase().as_str() {
-        "ionian" | "major" => Mode::Ionian,
-        "dorian" => Mode::Dorian,
-        "phrygian" => Mode::Phrygian,
-        "lydian" => Mode::Lydian,
-        "mixolydian" => Mode::Mixolydian,
-        "aeolian" | "minor" => Mode::Aeolian,
-        "locrian" => Mode::Locrian,
-        _ => Mode::Ionian, // Default to major
-    };
-
-    // Parse rhythm pattern
-    let rhythm_pattern = match rhythm.to_lowercase().as_str() {
-        "simple" => RhythmPattern::Simple,
-        "medium" => RhythmPattern::Medium,
-        "complex" => RhythmPattern::Complex,
-        "swung" => RhythmPattern::Swung,
-        "syncopated" => RhythmPattern::Syncopated,
-        _ => RhythmPattern::Simple, // Default to simple
-    };
-
-    generate_melody_samples(
-        root_pitch,
-        scale_type,
-        mode,
-        octave,
-        rhythm_pattern,
-        duration_total_seconds as u32, // Use the passed total duration
-        seconds_per_quarter_note, // Pass seconds_per_quarter_note
-        seed,
-    )
 }

@@ -7,13 +7,14 @@ edition = "2021"
 
 [dependencies]
 rodio = "0.17.3"
-rand = "0.9.0"
-rand_pcg = "0.3"
+rand = "0.8.5"
+rand_core = "0.9.3"
 crossterm = "0.27.0"
-ratatui = { version = "0.26.1", features = ["all-widgets"] }
+ratatui = { version = "0.26.1", features = ["crossterm"] }
 dasp_signal = "0.11.0"
 rust-music-theory = "0.2.0"
 rand_chacha = "0.3.1" # Corrected version
-crossbeam-channel = "0.5"
+crossbeam-channel = "0.5.12"
+textwrap = "0.16.1"
 
 # Removed tonic and prost dependencies as they are not used.
