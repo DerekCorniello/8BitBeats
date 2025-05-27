@@ -1,19 +1,17 @@
-mod bass;
-// mod config; // Removed
 mod gen;
 mod melodies;
 mod progs;
 mod tui;
 
 use crate::gen::MusicControl;
-use crate::gen::parse_song_id_to_app_state; // For parsing song IDs
+use crate::gen::parse_song_id_to_app_state; 
 use crate::tui::UserAction;
 use std::error::Error;
-use std::thread::JoinHandle; // For managing threads
-use ratatui::prelude::CrosstermBackend; // For TUI backend
-use std::thread; // For threading capabilities
-use std::time::Duration; // For time-based operations
-use crossbeam_channel::Sender as CrossbeamSender; // For sending messages between threads
+use std::thread::JoinHandle; 
+use ratatui::prelude::CrosstermBackend; 
+use std::thread; 
+use std::time::Duration; 
+use crossbeam_channel::Sender as CrossbeamSender; 
 
 /* main - Initializes the TUI and music service, then enters the main event loop.
  *
@@ -39,7 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut music_service_handle: Option<JoinHandle<()>> = None;
     let mut music_sender_option: Option<CrossbeamSender<MusicControl>> = Some(music_control_sender.clone());
 
-    // Music generation is now manually triggered by the user.
+    // Music generation is manually triggered by the user at the start
     'main: loop {
         tui.draw()?;
 
@@ -103,7 +101,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     gen::run_music_service(app_state_clone, new_music_receiver, new_progress_sender_clone);
                 }));
                 tui.set_playing_state(true); // Set TUI to playing
-                tui.focus_on_play_pause(); // Optional: set focus to Play/Pause
+                tui.focus_on_play_pause();
             }
             UserAction::GenerateMusic => {
                 if let Some(sender) = music_sender_option.take() {
