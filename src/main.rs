@@ -59,31 +59,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         match tui.handle_input()? {
-            UserAction::Quit => {
-                if let Some(sender) = music_sender_option.take() {
-                    sender.send(MusicControl::Terminate).ok();
-                }
-                if let Some(handle) = music_service_handle.take() {
-                    handle.join().expect("Failed to join music service thread");
-                }
-                break 'main;
-            }
-            UserAction::TogglePlayback => {
-                if let Some(sender) = &music_sender_option {
-                    if tui.is_paused() { 
-                        let _ = sender.send(MusicControl::Resume);
-                        tui.set_playing_state(true); 
-                    } else {
-                        let _ = sender.send(MusicControl::Pause);
-                        tui.set_playing_state(false); 
-                    }
-                }
-            }
+            UserAction::Quit => break 'main,
             UserAction::RewindSong => {
                 if let Some(sender) = &music_sender_option {
                     let _ = sender.send(MusicControl::Rewind);
-                    tui.reset_current_song_progress(); // Reset TUI progress immediately
-                    tui.set_playing_state(true);
+                    // After sending Rewind, TUI needs to be updated to reflect the song at the beginning
+                    tui.reset_current_song_progress(); // Visually reset progress in TUI
+                    tui.set_playing_state(true); // Ensure TUI shows as playing
+                    tui.focus_on_play_pause(); // Set focus back to play/pause
                 }
             }
             UserAction::FastForwardSong => {
@@ -143,40 +126,56 @@ fn main() -> Result<(), Box<dyn Error>> {
                 tui.set_playing_state(true);
                 tui.focus_on_play_pause(); 
             }
-            UserAction::ToggleLoop => {
-                // For now, main.rs doesn't need to do anything specific with loop state
-                // as it's managed by the TUI and music generation logic might use AppState.is_loop_enabled directly if needed.
-                // Or, a MusicControl message could be introduced if the music service needs to know about loop changes.
+            UserAction::TogglePlayback => {
+                if let Some(sender) = &music_sender_option {
+                    if tui.is_paused() { // If TUI thinks it's paused, we want to play
+                        let _ = sender.send(MusicControl::Resume);
+                        tui.set_playing_state(true); // Update TUI state
+                    } else { // If TUI thinks it's playing, we want to pause
+                        let _ = sender.send(MusicControl::Pause);
+                        tui.set_playing_state(false); // Update TUI state
+                    }
+                }
+            }
+            UserAction::ToggleHelp => {
+                tui.toggle_help();
             }
             UserAction::AttemptLoadSong => {
                 let song_name_to_load = tui.get_current_app_state().song_loader_input.trim().to_string();
-
-                if song_name_to_load.is_empty() {
-                    tui.show_song_id_error("Song ID cannot be empty. Format: Scale-Style-BPM-LengthInMinutes-Seed".to_string());
-                } else {
+                if !song_name_to_load.is_empty() {
                     match parse_song_id_to_app_state(&song_name_to_load) {
-                        Ok(parsed_app_state) => {
+                        Ok(loaded_app_state) => {
+                            // Terminate existing music service if any
                             if let Some(sender) = music_sender_option.take() {
-                                sender.send(MusicControl::Terminate).ok();
-                                if let Some(handle) = music_service_handle.take() { 
-                                    handle.join().expect("Failed to join music thread before loading new song");
+                                let _ = sender.send(MusicControl::Terminate);
+                                if let Some(handle) = music_service_handle.take() {
+                                    handle.join().expect("Failed to join music thread for song load");
                                 }
                             }
-                            // Drain any lingering progress messages from the old song
+                             // Drain any lingering progress messages
                             while progress_receiver.try_recv().is_ok() {}
                             
-                            tui.reset_progress_for_new_song(); // Reset TUI progress for new song
-                            
+                            tui.reset_progress_for_new_song(); // Reset visual progress
+                            // Update TUI with loaded state, but preserve some dynamic states like is_playing
+                            // parse_song_id_to_app_state returns a full AppState, so we use it directly
+                            // For now, we will directly use the loaded state, this implies song starts paused
+                            // and user has to press play.
+                            tui.set_app_state(loaded_app_state.clone()); // Directly set TUI state
+                            tui.set_current_song_id_display(Some(song_name_to_load.clone())); // Show the ID being loaded
+
                             let (new_music_sender, new_music_receiver) = crossbeam_channel::unbounded::<MusicControl>();
                             let new_progress_sender_clone = progress_sender.clone();
                             music_sender_option = Some(new_music_sender.clone());
-
-                            // Spawn the new music service with the parsed and validated AppState
-                            music_service_handle = Some(thread::spawn(move || { 
-                                gen::run_music_service(parsed_app_state, new_music_receiver, new_progress_sender_clone);
+                            
+                            // Spawn new music service with the loaded state
+                            music_service_handle = Some(thread::spawn(move || {
+                                gen::run_music_service(loaded_app_state, new_music_receiver, new_progress_sender_clone);
                             }));
                             
-                            tui.set_current_song_id_display(Some(song_name_to_load.clone())); // Set display for loaded song
+                            // After successfully setting up the new song, send a Resume command to start it.
+                            if let Some(sender) = &music_sender_option {
+                                let _ = sender.send(MusicControl::Resume);
+                            }
                             tui.set_playing_state(true);
                             tui.focus_on_play_pause(); 
                             tui.clear_song_loader_input();

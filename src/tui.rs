@@ -30,11 +30,11 @@ pub enum UserAction {
     SelectPopupItem,
     GenerateMusic,
     NoOp,
-    ToggleLoop,      // Added for the loop button
     AttemptLoadSong, // Renamed from LoadAndPlaySong
     CloseSongIdErrorPopup, // To close the error popup
     RewindSong, // Added for rewind
     FastForwardSong, // Added for fast-forward
+    ToggleHelp, // Added for help menu
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -50,7 +50,6 @@ pub enum InputId {
     Rewind,
     PlayPause,
     Skip,
-    Loop, // Replaced SaveSong
     Scale,
     Style,
     Bpm,
@@ -75,7 +74,7 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
             InputNode {
                 neighbors: HashMap::from([
                     (Direction::Right, InputId::PlayPause),
-                    (Direction::Left, InputId::Loop),
+                    (Direction::Left, InputId::Skip),
                     (Direction::Down, InputId::Scale),
                 ]),
             },
@@ -96,19 +95,8 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
             InputId::Skip,
             InputNode {
                 neighbors: HashMap::from([
-                    (Direction::Right, InputId::Loop),
-                    (Direction::Left, InputId::PlayPause),
-                    (Direction::Down, InputId::Style),
-                ]),
-            },
-        );
-
-        graph.insert(
-            InputId::Loop,
-            InputNode {
-                neighbors: HashMap::from([
                     (Direction::Right, InputId::Rewind),
-                    (Direction::Left, InputId::Skip),
+                    (Direction::Left, InputId::PlayPause),
                     (Direction::Down, InputId::Style),
                 ]),
             },
@@ -130,7 +118,7 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
             InputId::Style,
             InputNode {
                 neighbors: HashMap::from([
-                    (Direction::Up, InputId::Loop),
+                    (Direction::Up, InputId::Skip),
                     (Direction::Right, InputId::Scale),
                     (Direction::Left, InputId::Scale),
                     (Direction::Down, InputId::Length),
@@ -233,10 +221,10 @@ pub struct AppState {
     pub current_song_progress: f32,
     pub current_song_elapsed_secs: f32,
     pub current_song_duration_secs: f32,
-    pub is_loop_enabled: bool,         // Added for loop state
     pub song_loader_input: String,     // Added for the new song loader input
     pub song_id_error: Option<String>, // For song ID validation errors
     pub current_song_id_display: Option<String>, // To display the current song's ID
+    pub show_help: bool, // Added to control help menu visibility
 }
 
 impl Default for AppState {
@@ -278,10 +266,10 @@ impl Default for AppState {
             current_song_progress: 0.0,
             current_song_elapsed_secs: 0.0,
             current_song_duration_secs: 0.0,
-            is_loop_enabled: false,           // Default loop state
             song_loader_input: String::new(), // Initialize the new field
             song_id_error: None,              // Initialize error as None
             current_song_id_display: None,     // Initialize as None
+            show_help: false, // Default help menu to hidden
         }
     }
 }
@@ -398,27 +386,29 @@ impl<B: Backend> Tui<B> {
                 return;
             }
 
-            // Calculate the total required height for the app
             let title_height = 8; // Title section height
             let content_height = 24; // Adjusted: Now Playing (8) + Gap (1) + Create New Track (9) + Gap (1) + Load Song (5)
-            let total_app_height = title_height + content_height;
+            let help_hint_height = 1;
+            let total_app_content_height = title_height + content_height + help_hint_height;
 
             // Calculate vertical padding to center the app
-            let v_padding = (terminal_height.saturating_sub(total_app_height)) / 2;
+            let v_padding = (terminal_height.saturating_sub(total_app_content_height)) / 2;
 
             // Create top-level layout with vertical padding
-            let main_layout = Layout::default()
+            let app_layout = Layout::default()
                 .direction(LayoutDirection::Vertical)
                 .constraints([
                     Constraint::Length(v_padding),      // Top padding
                     Constraint::Length(title_height),   // Title
                     Constraint::Length(content_height), // Content
-                    Constraint::Min(v_padding),         // Bottom padding
+                    Constraint::Length(help_hint_height),// Footer for help hint
+                    Constraint::Min(0),         // Bottom padding (flexible, can be 0)
                 ])
                 .split(size);
 
-            let title_area = main_layout[1];
-            let content_area = main_layout[2];
+            let title_area = app_layout[1];
+            let content_area = app_layout[2];
+            let footer_area = app_layout[3];
 
             // Define your ASCII title
             let ascii_art = [
@@ -524,10 +514,9 @@ impl<B: Backend> Tui<B> {
             let control_layout = Layout::default()
                 .direction(LayoutDirection::Horizontal)
                 .constraints([
-                    Constraint::Ratio(1, 4),
-                    Constraint::Ratio(1, 4),
-                    Constraint::Ratio(1, 4),
-                    Constraint::Ratio(1, 4),
+                    Constraint::Ratio(1, 3),
+                    Constraint::Ratio(1, 3),
+                    Constraint::Ratio(1, 3),
                 ])
                 .split(now_playing_layout[4]);
 
@@ -548,14 +537,6 @@ impl<B: Backend> Tui<B> {
             };
 
             let skip_style = if self.current_focus == InputId::Skip
-                && self.state.input_mode == InputMode::Navigation
-            {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default()
-            };
-
-            let loop_style = if self.current_focus == InputId::Loop
                 && self.state.input_mode == InputMode::Navigation
             {
                 Style::default().fg(Color::Yellow)
@@ -584,20 +565,9 @@ impl<B: Backend> Tui<B> {
                 .alignment(Alignment::Center)
                 .add_modifier(Modifier::BOLD);
 
-            let loop_button_text = if self.state.is_loop_enabled {
-                "[↻ Disable Loop]"
-            } else {
-                "[↻ Enable Loop]"
-            };
-            let loop_widget = Paragraph::new(loop_button_text)
-                .style(loop_style)
-                .alignment(Alignment::Center)
-                .add_modifier(Modifier::BOLD);
-
             f.render_widget(rewind, control_layout[0]);
             f.render_widget(play_pause, control_layout[1]);
             f.render_widget(skip, control_layout[2]);
-            f.render_widget(loop_widget, control_layout[3]);
 
             // Create and render the Create New Track panel
             let create_track_block = Block::default()
@@ -976,12 +946,81 @@ impl<B: Backend> Tui<B> {
                     f.render_widget(instruction_paragraph, popup_content_layout[1]);
                 }
             }
+
+            // Help Popup / Menu
+            if self.state.show_help {
+                let help_text = vec![
+                    Line::from(Span::styled("--- Hotkeys ---", Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow))),
+                    Line::from(""),
+                    Line::from(Span::styled("Global:", Style::default().add_modifier(Modifier::UNDERLINED))),
+                    Line::from("  q: Quit"),
+                    Line::from("  p: Play/Pause"),
+                    Line::from("  r: Rewind Song"),
+                    Line::from("  f: Fast Forward (New Random Song)"),
+                    Line::from("  ?: Toggle Help Menu"),
+                    Line::from(""),
+                    Line::from(Span::styled("Navigation Mode (Arrow Keys or Vim Keys):", Style::default().add_modifier(Modifier::UNDERLINED))),
+                    Line::from("  ↑/k: Navigate Up"),
+                    Line::from("  ↓/j: Navigate Down"),
+                    Line::from("  ←/h: Navigate Left"),
+                    Line::from("  →/l: Navigate Right"),
+                    Line::from("  Enter: Select / Activate"),
+                    Line::from(""),
+                    Line::from(Span::styled("Editing Mode (for BPM, Seed, Load ID):", Style::default().add_modifier(Modifier::UNDERLINED))),
+                    Line::from("  Enter: Confirm Edit"),
+                    Line::from("  Esc: Cancel Edit"),
+                    Line::from("  Backspace: Delete Character"),
+                    Line::from(""),
+                    Line::from(Span::styled("Popup Menus (Scale, Style, Length):", Style::default().add_modifier(Modifier::UNDERLINED))),
+                    Line::from("  ↑/k: Cycle Up"),
+                    Line::from("  ↓/j: Cycle Down"),
+                    Line::from("  Enter: Select Item"),
+                    Line::from("  Esc: Close Popup"),
+                ];
+
+                let popup_width = 60;
+                let popup_height = (help_text.len() + 2) as u16; // +2 for borders
+
+                let popup_x = (f.size().width.saturating_sub(popup_width)) / 2;
+                let popup_y = (f.size().height.saturating_sub(popup_height)) / 2;
+
+                let popup_area = Rect {
+                    x: popup_x,
+                    y: popup_y,
+                    width: popup_width,
+                    height: popup_height,
+                };
+
+                f.render_widget(Clear, popup_area); // Clear the area for the popup
+
+                let help_block = Block::default()
+                    .title("Help - Hotkeys")
+                    .borders(Borders::ALL)
+                    .style(Style::default().bg(Color::DarkGray));
+                
+                let help_paragraph = Paragraph::new(help_text)
+                    .block(help_block)
+                    .wrap(ratatui::widgets::Wrap { trim: true });
+
+                f.render_widget(help_paragraph, popup_area);
+            }
+
+            // Render Help Hint Footer
+            let help_hint = Paragraph::new("Press ? for help")
+                .style(Style::default().fg(Color::DarkGray))
+                .alignment(Alignment::Center);
+            f.render_widget(help_hint, footer_area);
+
         })?;
         Ok(())
     }
 
     pub fn get_current_app_state(&self) -> AppState {
         self.state.clone()
+    }
+
+    pub fn set_app_state(&mut self, new_state: AppState) {
+        self.state = new_state;
     }
 
     // Method to get the current focused InputId
@@ -992,6 +1031,10 @@ impl<B: Backend> Tui<B> {
     // Method to explicitly set the playing state, e.g., after music generation
     pub fn set_playing_state(&mut self, is_playing: bool) {
         self.state.is_playing = is_playing;
+    }
+
+    pub fn toggle_help(&mut self) {
+        self.state.show_help = !self.state.show_help;
     }
 
     pub fn is_paused(&self) -> bool {
@@ -1036,12 +1079,28 @@ impl<B: Backend> Tui<B> {
     pub fn handle_input(&mut self) -> std::io::Result<UserAction> {
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                // Global keybindings (available in any mode)
+                if self.state.show_help {
+                    // When help is shown, only '?' or 'q' on press do something.
+                    // All other events (other keys, or non-press events) are NoOp.
+                    if key.kind == event::KeyEventKind::Press {
+                        match key.code {
+                            KeyCode::Char('?') => return Ok(UserAction::ToggleHelp), // Action to close help
+                            KeyCode::Char('q') => return Ok(UserAction::Quit),
+                            _ => {} // Other pressed keys will fall through to the NoOp below
+                        }
+                    }
+                    return Ok(UserAction::NoOp); // Catch-all for any event if help is shown and not handled above
+                }
+
+                // ---- Help is NOT shown at this point ----
+                // Global keybindings (available when help is NOT shown)
                 if key.kind == event::KeyEventKind::Press {
                     match key.code {
+                        KeyCode::Char('?') => return Ok(UserAction::ToggleHelp), // Action to open help
                         KeyCode::Char('q') => return Ok(UserAction::Quit),
                         KeyCode::Char('p') => return Ok(UserAction::TogglePlayback),
-                        KeyCode::Char('l') => return Ok(UserAction::ToggleLoop),
+                        KeyCode::Char('r') => return Ok(UserAction::RewindSong),
+                        KeyCode::Char('f') => return Ok(UserAction::FastForwardSong),
                         _ => {} 
                     }
                 }
@@ -1049,21 +1108,21 @@ impl<B: Backend> Tui<B> {
                 match self.state.input_mode {
                     InputMode::Navigation => {
                         match key.code {
-                            KeyCode::Up => {
+                            KeyCode::Up | KeyCode::Char('k') => {
                                 self.current_focus = next_focus(self.current_focus, Direction::Up);
                                 Ok(UserAction::Navigate)
                             }
-                            KeyCode::Down => {
+                            KeyCode::Down | KeyCode::Char('j') => {
                                 self.current_focus =
                                     next_focus(self.current_focus, Direction::Down);
                                 Ok(UserAction::Navigate)
                             }
-                            KeyCode::Left => {
+                            KeyCode::Left | KeyCode::Char('h') => {
                                 self.current_focus =
                                     next_focus(self.current_focus, Direction::Left);
                                 Ok(UserAction::Navigate)
                             }
-                            KeyCode::Right => {
+                            KeyCode::Right | KeyCode::Char('l') => {
                                 self.current_focus =
                                     next_focus(self.current_focus, Direction::Right);
                                 Ok(UserAction::Navigate)
@@ -1074,10 +1133,6 @@ impl<B: Backend> Tui<B> {
                                     Ok(UserAction::TogglePlayback)
                                 }
                                 InputId::Skip => Ok(UserAction::FastForwardSong),
-                                InputId::Loop => {
-                                    self.state.is_loop_enabled = !self.state.is_loop_enabled;
-                                    Ok(UserAction::ToggleLoop)
-                                }
                                 InputId::Scale => {
                                     self.state.input_mode = InputMode::ScalePopup;
                                     self.state.popup_list_state.select(Some(0));
@@ -1111,7 +1166,6 @@ impl<B: Backend> Tui<B> {
                                     self.state.input_mode = InputMode::SongLoaderEditing;
                                     Ok(UserAction::SwitchToEditing)
                                 }
-                                _ => Ok(UserAction::NoOp),
                             },
                             _ => Ok(UserAction::NoOp),
                         }
