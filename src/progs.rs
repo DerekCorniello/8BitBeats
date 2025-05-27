@@ -3,12 +3,35 @@ use rust_music_theory::note::{Note, Notes, PitchClass};
 use dasp_signal::Signal;
 use rust_music_theory::chord::{Chord, Number as ChordNumber, Quality as ChordQuality};
 
-/// Extension trait to add numeric conversion methods to PitchClass
+/* PitchClassExt - Extension trait for `rust_music_theory::note::PitchClass`.
+ *
+ * This trait adds methods to convert `PitchClass` enum variants to and from numeric
+ * representations (semitone offsets).
+ */
 trait PitchClassExt {
-    /// Convert to semitone offset (0-11)
+    /* to_semitone - Converts a `PitchClass` to its semitone offset.
+     *
+     * The semitone offset is a value from 0 (for C) to 11 (for B).
+     *
+     * inputs:
+     *     - self (&Self): The `PitchClass` instance.
+     *
+     * outputs:
+     *     - i32: The semitone offset (0-11).
+     */
     fn to_semitone(&self) -> i32;
 
-    /// Create from numeric value
+    /* from_numeric - Creates a `PitchClass` from a numeric value.
+     *
+     * The numeric value is taken modulo 12 to map to one of the 12 pitch classes.
+     * For example, 0 maps to C, 1 to C#, ..., 11 to B.
+     *
+     * inputs:
+     *     - value (u8): The numeric value representing the pitch class.
+     *
+     * outputs:
+     *     - Self: The corresponding `PitchClass`.
+     */
     fn from_numeric(value: u8) -> Self;
 }
 
@@ -51,8 +74,19 @@ impl PitchClassExt for PitchClass {
     }
 }
 
-/// Convert a Note to its MIDI number.
-/// MIDI numbers represent notes in a standardized way where each number is a specific pitch.
+/* note_to_midi - Converts a `rust_music_theory::note::Note` to its MIDI number.
+ *
+ * MIDI numbers provide a standardized way to represent musical pitches. This function
+ * calculates the MIDI number based on the note's pitch class and octave.
+ * The formula used is: (octave + 1) * 12 + semitone_offset_from_C.
+ * For example, C4 (middle C) is MIDI note 60.
+ *
+ * inputs:
+ *     - note (&Note): A reference to the `Note` object.
+ *
+ * outputs:
+ *     - i32: The MIDI number of the note.
+ */
 fn note_to_midi(note: &Note) -> i32 {
     // Get the semitone offset based on the pitch class
     let semitone = note.pitch_class.to_semitone();
@@ -62,8 +96,18 @@ fn note_to_midi(note: &Note) -> i32 {
     (note.octave as i32 + 1) * 12 + semitone
 }
 
-/// Convert a Note to its frequency in Hz.
-/// This uses the standard formula to convert MIDI note numbers to frequency.
+/* note_to_frequency - Converts a `rust_music_theory::note::Note` to its frequency in Hz.
+ *
+ * This function first converts the note to its MIDI number and then uses the standard
+ * A440 tuning (A4 = 440Hz, MIDI note 69) to calculate the frequency.
+ * The formula is: frequency = 440.0 * 2^((midi_number - 69.0) / 12.0).
+ *
+ * inputs:
+ *     - note (&Note): A reference to the `Note` object.
+ *
+ * outputs:
+ *     - f32: The frequency of the note in Hz.
+ */
 fn note_to_frequency(note: &Note) -> f32 {
     let midi_number = note_to_midi(note) as f32;
 
@@ -72,14 +116,28 @@ fn note_to_frequency(note: &Note) -> f32 {
     440.0 * 2f32.powf((midi_number - 69.0) / 12.0)
 }
 
-/// Generate chord samples.
-/// This creates the sound data for a chord with the given properties.
+/* generate_chord_samples - Generates audio samples for a given chord.
+ *
+ * This function creates the sound data for a chord by synthesizing sine waves for each note
+ * in the chord and summing them. The amplitude of each sine wave is initially set to 0.4
+ * before summing and averaging to prevent clipping.
+ *
+ * inputs:
+ *     - root_note (PitchClass): The root pitch class of the chord (e.g., C, G#, Bb).
+ *     - chord_quality (ChordQuality): The quality of the chord (e.g., Major, minor, Dominant).
+ *     - chord_type (ChordNumber): The type of chord (e.g., Triad, Seventh, Ninth).
+ *     - duration_seconds (f32): The desired duration of the chord in seconds.
+ *     - sample_rate (u32): The audio sample rate in samples per second (e.g., 44100 Hz).
+ *
+ * outputs:
+ *     - Vec<f32>: A vector of f32 audio samples representing the chord.
+ */
 pub fn generate_chord_samples(
-    root_note: PitchClass,       // The root note of the chord (C, D, etc.)
-    chord_quality: ChordQuality, // Major, minor, diminished, etc.
-    chord_type: ChordNumber,     // Triad, seventh, ninth, etc.
-    duration_seconds: f32,       // How long the chord should play
-    sample_rate: u32,            // Audio quality (samples per second)
+    root_note: PitchClass,
+    chord_quality: ChordQuality,
+    chord_type: ChordNumber,
+    duration_seconds: f32,
+    sample_rate: u32,
 ) -> Vec<f32> {
     // Create a chord object using the music theory library
     let chord = Chord::new(root_note, chord_quality, chord_type);
@@ -117,12 +175,42 @@ pub fn generate_chord_samples(
     chord_samples
 }
 
-/// Get a PitchClass from a numeric value
+/* get_pitch - Converts a numeric value (0-11) to a `PitchClass`.
+ *
+ * This is a convenience function that wraps `PitchClassExt::from_numeric`.
+ *
+ * inputs:
+ *     - root (u8): A numeric value representing the pitch class (0 for C, 1 for C#, etc.).
+ *
+ * outputs:
+ *     - PitchClass: The corresponding `PitchClass`.
+ */
 pub fn get_pitch(root: u8) -> PitchClass {
     PitchClass::from_numeric(root)
 }
 
-/// Get a chord progression by name
+/* get_progression - Retrieves a predefined chord progression and its corresponding root notes.
+ *
+ * This function generates a sequence of chords based on a progression name (e.g., "blues", "pop", "jazz")
+ * and a root note. It returns both the audio samples for each chord and a list of the MIDI
+ * note numbers for the root of each chord in the progression.
+ *
+ * The root notes are calculated assuming the input `root` (0-11) is for a specific octave (e.g. C4).
+ * For the generated chord root MIDI notes (used for bass lines), they are set to octave 3.
+ * For example, if `root` is C (0) and `current_root_offset` is G (7), the `absolute_root` for chord
+ * generation is G (7). The MIDI note for this root, for bass line purposes, would be G3 (MIDI 55), calculated as:
+ * `root` (0) + `current_root_offset` (7) + 12 * 3 = 55.
+ *
+ * inputs:
+ *     - prog_name (String): The name of the desired progression (case-insensitive).
+ *     - root (u8): The root note (0-11, e.g., 0 for C, 1 for C#) for the entire progression.
+ *     - chord_duration (f32): The duration of each chord in seconds.
+ *
+ * outputs:
+ *     - (Vec<Vec<f32>>, Vec<u8>): A tuple containing:
+ *         - A vector where each inner vector contains the audio samples for a chord in the progression.
+ *         - A vector of u8 MIDI note numbers for the root of each chord in the progression.
+ */
 pub fn get_progression(prog_name: String, root: u8, chord_duration: f32) -> (Vec<Vec<f32>>, Vec<u8>) {
     let sample_rate = 44100; // Standard CD-quality audio
     let mut chord_samples_list = Vec::new();

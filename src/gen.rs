@@ -12,8 +12,23 @@ use rodio::{buffer::SamplesBuffer, OutputStream, Sink};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/* play_progression - Generates an audio sequence for a musical chord progression.
+ *
+ * Given a progression name (e.g., "blues", "pop"), a root note, and duration for each chord,
+ * this function retrieves the chord voicings and their root notes. It then concatenates
+ * the audio samples of these chords to form a continuous audio sequence.
+ *
+ * inputs:
+ *     - prog_name (String): The name of the chord progression to use.
+ *     - root_note (u8): The MIDI root note for the first chord of the progression.
+ *     - chord_duration (f32): The duration in seconds for each chord in the progression.
+ *
+ * outputs:
+ *     - (Vec<f32>, Vec<u8>): A tuple containing:
+ *         - Vec<f32>: The concatenated audio samples of the chord progression.
+ *         - Vec<u8>: A list of the root notes for each chord in the generated progression.
+ */
 fn play_progression(prog_name: String, root_note: u8, chord_duration: f32) -> (Vec<f32>, Vec<u8>) {
-    // Get the progression chords and their root notes
     let (progression_chords, progression_root_notes) = progs::get_progression(prog_name, root_note, chord_duration);
 
     // Combine all chord samples
@@ -26,26 +41,55 @@ fn play_progression(prog_name: String, root_note: u8, chord_duration: f32) -> (V
     (audio_sequence, progression_root_notes)
 }
 
+/* MusicControl - Defines commands to control the music playback service.
+ *
+ * These messages are sent from the TUI or other control points to the music generation
+ * and playback thread to manage its state.
+ */
 pub enum MusicControl {
-    Pause,
-    Resume,
-    Terminate,
-    Rewind,
+    Pause,      // Pauses current playback.
+    Resume,     // Resumes current playback.
+    Terminate,  // Stops playback and terminates the music service thread.
+    Rewind,     // Restarts the current song from the beginning.
 }
 
-// New struct for progress updates
+/* MusicProgress - Reports the playback progress of the current song.
+ *
+ * Transmitted from the music service to the TUI to update progress indicators.
+ *
+ * fields:
+ *     - current_samples (u64): Number of audio samples played so far.
+ *     - total_samples (u64): Total number of audio samples in the current song.
+ *     - actual_seed (u64): The seed value that was actually used to generate the current song.
+ */
 pub struct MusicProgress {
     pub current_samples: u64,
     pub total_samples: u64,
     pub actual_seed: u64,
 }
 
+/* MusicPlayer - Manages audio playback state and hardware interaction.
+ *
+ * This struct encapsulates the Rodio sink and stream, handles playback control messages,
+ * and keeps track of the current audio data and playback position.
+ *
+ * fields:
+ *     - receiver (CrossbeamReceiver<MusicControl>): Receives control messages.
+ *     - sink (Sink): The Rodio audio sink for playing samples.
+ *     - _stream (OutputStream): The Rodio output stream (held to keep audio active).
+ *     - current_audio_data (Option<Vec<f32>>): Buffer for the currently loaded song's audio samples.
+ *     - current_sample_rate (Option<u32>): Sample rate of the current audio data.
+ *     - total_samples (u64): Total samples in `current_audio_data`.
+ *     - playback_start_time (Option<Instant>): Timestamp of when playback last (re)started.
+ *     - samples_played_at_pause (u64): Number of samples played before the last pause.
+ *     - should_terminate (bool): Flag to signal the playback loop to exit.
+ */
 pub struct MusicPlayer {
     receiver: CrossbeamReceiver<MusicControl>,
     sink: Sink,
     _stream: OutputStream,
-    current_audio_data: Option<Vec<f32>>, // Added to store current audio data
-    current_sample_rate: Option<u32>,    // Added to store current sample rate
+    current_audio_data: Option<Vec<f32>>,
+    current_sample_rate: Option<u32>,
     total_samples: u64,
     playback_start_time: Option<Instant>,
     samples_played_at_pause: u64,
@@ -53,6 +97,17 @@ pub struct MusicPlayer {
 }
 
 impl MusicPlayer {
+    /* new - Creates a new `MusicPlayer` instance.
+     *
+     * Initializes the audio output stream and sink, preparing for playback.
+     * The sink starts in a paused state.
+     *
+     * inputs:
+     *     - receiver (CrossbeamReceiver<MusicControl>): Channel to receive playback control messages.
+     *
+     * outputs:
+     *     - Self: A new `MusicPlayer` instance.
+     */
     pub fn new(receiver: CrossbeamReceiver<MusicControl>) -> Self {
         let (_stream, stream_handle) =
             OutputStream::try_default().expect("Failed to get output stream");
@@ -71,6 +126,19 @@ impl MusicPlayer {
         }
     }
 
+    /* play_audio - Loads new audio data into the player and prepares it for playback.
+     *
+     * Stops any currently playing audio, replaces it with the new data, and resets
+     * playback progress. The sink remains paused after loading; `Resume` is needed to start.
+     *
+     * inputs:
+     *     - &mut self
+     *     - audio_data (Vec<f32>): The raw audio samples to play.
+     *     - sample_rate (u32): The sample rate of the provided `audio_data`.
+     *
+     * outputs:
+     *     - None
+     */
     pub fn play_audio(&mut self, audio_data: Vec<f32>, sample_rate: u32) {
         self.sink.stop(); 
 
@@ -86,13 +154,34 @@ impl MusicPlayer {
         self.sink.append(source);
     }
 
+    /* should_continue - Checks if the music service should continue its playback loop.
+     *
+     * inputs:
+     *     - &self
+     *
+     * outputs:
+     *     - bool: True if the service should continue, false if termination is requested.
+     */
     pub fn should_continue(&self) -> bool {
         !self.should_terminate
     }
 }
 
-// Internal function to generate audio based on AppState
-// Returns (audio_data, sample_rate, actual_seed_used)
+/* generate_audio_from_state - Generates raw audio samples based on application state.
+ *
+ * This internal function takes the current `AppState` (scale, style, BPM, etc.) and
+ * orchestrates calls to melody, chord progression, and bass line generation modules.
+ * It then mixes these components and applies basic normalization.
+ *
+ * inputs:
+ *     - app_state (&AppState): The current application state defining music parameters.
+ *
+ * outputs:
+ *     - (Vec<f32>, u32, u64): A tuple containing:
+ *         - Vec<f32>: The generated and mixed audio samples.
+ *         - u32: The sample rate of the generated audio (typically `SAMPLE_RATE_AUDIO_GEN`).
+ *         - u64: The actual seed value used for random number generation.
+ */
 fn generate_audio_from_state(app_state: &AppState) -> (Vec<f32>, u32, u64) { 
     const SAMPLE_RATE_AUDIO_GEN: u32 = 44100;
 
@@ -154,7 +243,20 @@ fn generate_audio_from_state(app_state: &AppState) -> (Vec<f32>, u32, u64) {
     (mixed_audio, SAMPLE_RATE_AUDIO_GEN, actual_generated_seed)
 }
 
-// This is the main function that will be called to start music playback in a thread
+/* run_music_service - Main function for the music generation and playback thread.
+ *
+ * This function initializes a `MusicPlayer`, generates initial audio based on `initial_app_state`,
+ * and then enters a loop to handle control messages (Pause, Resume, Rewind, Terminate)
+ * and report playback progress.
+ *
+ * inputs:
+ *     - initial_app_state (AppState): The application state to use for generating the first song.
+ *     - receiver (CrossbeamReceiver<MusicControl>): Channel to receive control messages.
+ *     - progress_sender (CrossbeamSender<MusicProgress>): Channel to send progress updates.
+ *
+ * outputs:
+ *     - None (runs in a separate thread until Terminate is received).
+ */
 pub fn run_music_service(initial_app_state: AppState, receiver: CrossbeamReceiver<MusicControl>, progress_sender: CrossbeamSender<MusicProgress>) {
     const SAMPLE_RATE_PROGRESS: f32 = 44100.0; // For progress calculation (as f32)
 
@@ -268,7 +370,19 @@ pub fn run_music_service(initial_app_state: AppState, receiver: CrossbeamReceive
     });
 }
 
-// Function to parse a song ID string into an AppState
+/* parse_song_id_to_app_state - Parses a song ID string into an `AppState`.
+ *
+ * The song ID format is expected to be "Scale-Style-BPM-Length-Seed", e.g., "C-Pop-120-5min-12345".
+ * This function attempts to parse these components and construct an `AppState` suitable for
+ * regenerating or loading the described song.
+ *
+ * inputs:
+ *     - id_string (&str): The song ID string to parse.
+ *
+ * outputs:
+ *     - Result<AppState, String>: Ok with the parsed `AppState` if successful,
+ *                               or an Err with a descriptive message if parsing fails.
+ */
 pub fn parse_song_id_to_app_state(id_string: &str) -> Result<AppState, String> {
     let parts: Vec<&str> = id_string.split('-').collect();
     if parts.len() != 5 {

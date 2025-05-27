@@ -6,19 +6,31 @@ mod progs;
 mod tui;
 
 use crate::gen::MusicControl;
-use crate::gen::parse_song_id_to_app_state; // Import the parser
+use crate::gen::parse_song_id_to_app_state; // For parsing song IDs
 use crate::tui::UserAction;
 use std::error::Error;
-use std::thread::JoinHandle; // For managing the music service thread
-use ratatui::prelude::CrosstermBackend; // Added for TUI backend
-use std::thread; // Added for thread::sleep
-use std::time::Duration; // Added for Duration
-// Simplified crossbeam import if Receiver is not directly used here for an initialized variable
-use crossbeam_channel::{self, Sender as CrossbeamSender}; 
+use std::thread::JoinHandle; // For managing threads
+use ratatui::prelude::CrosstermBackend; // For TUI backend
+use std::thread; // For threading capabilities
+use std::time::Duration; // For time-based operations
+use crossbeam_channel::Sender as CrossbeamSender; // For sending messages between threads
 
+/* main - Initializes the TUI and music service, then enters the main event loop.
+ *
+ * This function is the entry point of the 8BitBeats application. It sets up
+ * the terminal user interface (TUI), initializes channels for communication
+ * between the TUI and the music generation service, and then enters a loop
+ * to handle user input and update the TUI.
+ *
+ * inputs:
+ *     - None
+ *
+ * outputs
+ *     - Result<(), Box<dyn Error>> : Ok if the application runs and exits successfully,
+ *                                   or an error if an unrecoverable issue occurs.
+ */
 fn main() -> Result<(), Box<dyn Error>> {
-    // music_control_receiver was unused
-    let (music_control_sender, _) = crossbeam_channel::unbounded::<MusicControl>();
+    let (music_control_sender, _music_control_receiver) = crossbeam_channel::unbounded::<MusicControl>();
     let (progress_sender, progress_receiver) = crossbeam_channel::unbounded::<gen::MusicProgress>();
 
     let mut tui = tui::Tui::new(CrosstermBackend::new(std::io::stdout()))?;
@@ -27,17 +39,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut music_service_handle: Option<JoinHandle<()>> = None;
     let mut music_sender_option: Option<CrossbeamSender<MusicControl>> = Some(music_control_sender.clone());
 
-    // Initial music generation (optional - could start paused or with a default track)
-    // For now, let's not auto-start. User must press Play or Generate.
-    // let initial_app_state = tui.get_current_app_state();
-    // gen::run_music_service(initial_app_state, music_control_receiver, progress_sender.clone()); // Pass progress_sender
-    // music_service_handle = Some(std::thread::spawn(|| {})); // This handle logic needs to be more robust
-
+    // Music generation is now manually triggered by the user.
     'main: loop {
         tui.draw()?;
 
         // Check for progress updates from the music service
-        if let Ok(progress) = progress_receiver.try_recv() { // try_recv from crossbeam
+        if let Ok(progress) = progress_receiver.try_recv() {
             tui.update_progress(progress.current_samples, progress.total_samples);
             
             // If a song was just generated, its ID display might not be set yet.
@@ -188,7 +195,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             UserAction::NoOp => {}
-            // Ensure other UserActions that tui might return but main doesn't explicitly handle are covered or lead to NoOp
+            // UserActions handled by TUI state changes or that trigger TUI updates,
+            // allowing the main loop to continue.
             UserAction::UpdateInput |
             UserAction::Navigate |
             UserAction::SwitchToEditing |

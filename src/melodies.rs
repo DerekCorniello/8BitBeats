@@ -4,7 +4,16 @@ use rand::rngs::StdRng;
 use rust_music_theory::note::{Note, Notes, PitchClass};
 use rust_music_theory::scale::{Direction, Mode, Scale, ScaleType};
 
-/// Convert a PitchClass to its semitone offset (0-11)
+/* pitch_to_semitone - Converts a `PitchClass` to its semitone offset from C.
+ *
+ * (C=0, C#=1, ..., B=11)
+ *
+ * inputs:
+ *     - pitch (&PitchClass): The pitch class to convert.
+ *
+ * outputs:
+ *     - u8: The semitone offset (0-11).
+ */
 fn pitch_to_semitone(pitch: &PitchClass) -> u8 {
     match pitch {
         PitchClass::C => 0,
@@ -22,7 +31,16 @@ fn pitch_to_semitone(pitch: &PitchClass) -> u8 {
     }
 }
 
-/// Convert a numeric value to PitchClass
+/* semitone_to_pitch - Converts a semitone offset (from C) back to a `PitchClass`.
+ *
+ * Wraps around 12, so 12 becomes C, 13 becomes C#, etc.
+ *
+ * inputs:
+ *     - semitone (u8): The semitone offset (0-11 typically, but handles larger values).
+ *
+ * outputs:
+ *     - PitchClass: The corresponding pitch class.
+ */
 fn semitone_to_pitch(semitone: u8) -> PitchClass {
     match semitone % 12 {
         0 => PitchClass::C,
@@ -41,7 +59,16 @@ fn semitone_to_pitch(semitone: u8) -> PitchClass {
     }
 }
 
-/// Convert a Note to its frequency in Hz
+/* note_to_frequency - Converts a `Note` (pitch class and octave) to its frequency in Hz.
+ *
+ * Uses the standard A4=440Hz tuning reference.
+ *
+ * inputs:
+ *     - note (&Note): The note to convert.
+ *
+ * outputs:
+ *     - f32: The frequency of the note in Hertz.
+ */
 fn note_to_frequency(note: &Note) -> f32 {
     let octave_offset = (note.octave as i32 + 1) * 12;
     let semitone = pitch_to_semitone(&note.pitch_class) as i32;
@@ -51,19 +78,39 @@ fn note_to_frequency(note: &Note) -> f32 {
     440.0 * 2f32.powf((midi_number as f32 - 69.0) / 12.0)
 }
 
-/// Represents rhythm patterns for melodies
+/* RhythmPattern - Defines different rhythmic feels for melody generation.
+ *
+ * Each variant implies a different distribution of note durations.
+ */
 pub enum RhythmPattern {
-    // Quarter notes (1 note per beat)
-    Simple,
-    // Eighth notes (2 notes per beat)
-    Medium,
-    // Mix of eighth and sixteenth notes
-    Complex,
-    // Syncopated rhythm with some off-beat notes
-    Syncopated,
+    Simple,     // Primarily quarter notes (1 note per beat).
+    Medium,     // Mix of quarter and eighth notes (1-2 notes per beat).
+    Complex,    // Mix of eighth and sixteenth notes, allowing for faster passages.
+    Syncopated, // Emphasizes off-beat notes for a syncopated feel.
 }
 
-/// Generate melody samples based on given parameters
+/* generate_melody_samples - Generates a sequence of audio samples for a melody.
+ *
+ * This function constructs a melody based on musical scale, rhythm, and duration.
+ * It involves several steps:
+ * 1. Defining note durations based on the `rhythm_pattern`.
+ * 2. Selecting a sequence of notes from the specified `scale` with probabilistic transitions.
+ * 3. Synthesizing audio samples for each note using a simple sine wave and an ADSR envelope.
+ * 4. Applying articulation (small gaps) between notes.
+ *
+ * inputs:
+ *     - root_note (PitchClass): The tonic of the scale for the melody.
+ *     - scale_type (ScaleType): The type of scale (e.g., Major, Minor).
+ *     - mode (Mode): The mode of the scale (e.g., Ionian, Dorian).
+ *     - octave (i8): The base octave for the melody notes.
+ *     - rhythm_pattern (RhythmPattern): The rhythmic feel to apply.
+ *     - duration_seconds (u32): Total desired duration of the melody in seconds.
+ *     - seconds_per_quarter_note (f32): Duration of a single quarter note, derived from BPM.
+ *     - seed (u64): Seed for the random number generator to ensure reproducibility.
+ *
+ * outputs:
+ *     - Vec<f32>: A vector of f32 audio samples representing the generated melody at SAMPLE_RATE.
+ */
 pub fn generate_melody_samples(
     root_note: PitchClass,
     scale_type: ScaleType,
@@ -269,8 +316,23 @@ pub fn generate_melody_samples(
     all_samples
 }
 
-/// Generate a melody that fits a specific chord progression style
-pub fn get_melody(style: &str, root: u8, duration: u32, seconds_per_quarter_note: f32, seed: u64) -> Vec<f32> { // Changed bpm to seconds_per_quarter_note
+/* get_melody - Generates melody audio samples based on style, root note, and duration.
+ *
+ * This function acts as a high-level selector for melody generation. It interprets the
+ * `style` string to choose appropriate scale, mode, rhythm, and octave parameters,
+ * then calls `generate_melody_samples` to create the audio.
+ *
+ * inputs:
+ *     - style (&str): Musical style string (e.g., "pop", "rock", "jazz", "blues").
+ *     - root (u8): MIDI root note of the scale (0-11).
+ *     - duration (u32): Total desired duration of the melody in seconds.
+ *     - seconds_per_quarter_note (f32): Duration of a single quarter note, derived from BPM.
+ *     - seed (u64): Seed for random number generation.
+ *
+ * outputs:
+ *     - Vec<f32>: A vector of f32 audio samples representing the generated melody.
+ */
+pub fn get_melody(style: &str, root: u8, duration: u32, seconds_per_quarter_note: f32, seed: u64) -> Vec<f32> {
     let root_pitch = semitone_to_pitch(root);
     let mut rng = StdRng::seed_from_u64(seed); // Changed from ChaCha8Rng. Initialize RNG here for consistent choices
 

@@ -17,7 +17,12 @@ use std::{collections::HashMap, io, sync::OnceLock};
 
 // Removed: use std::time::Instant;
 
-// Define UserAction enum
+// UserAction defines the set of actions a user can perform within the TUI.
+/* UserAction - Represents all possible actions a user can trigger in the TUI.
+ *
+ * This enum is used to communicate user intentions from the input handling logic
+ * to the main application loop, which then acts upon these actions.
+ */
 pub enum UserAction {
     Quit,
     TogglePlayback,
@@ -37,6 +42,10 @@ pub enum UserAction {
     ToggleHelp, // Added for help menu
 }
 
+/* Direction - Represents navigational directions within the TUI.
+ *
+ * Used for navigating between focusable UI elements.
+ */
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum Direction {
     Up,
@@ -45,6 +54,11 @@ pub enum Direction {
     Right,
 }
 
+/* InputId - Uniquely identifies each interactable UI element.
+ *
+ * This enum is used to track the currently focused UI element and to define
+ * the navigation graph between elements.
+ */
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum InputId {
     Rewind,
@@ -59,13 +73,36 @@ pub enum InputId {
     SongLoader,
 }
 
+/* InputNode - Represents a node in the TUI navigation graph.
+ *
+ * Each node corresponds to an `InputId` and stores its neighbors in different
+ * navigation directions.
+ *
+ * fields:
+ *     - neighbors (HashMap<Direction, InputId>): Maps navigation `Direction` to the `InputId` of the neighboring element.
+ */
 #[derive(Debug)]
 struct InputNode {
     neighbors: HashMap<Direction, InputId>,
 }
 
+// INPUT_GRAPH defines the static navigation map between UI elements.
+// It uses InputId as keys and InputNode to define reachable neighbors.
 static INPUT_GRAPH: OnceLock<HashMap<InputId, InputNode>> = OnceLock::new();
 
+/* get_input_graph - Retrieves or initializes the TUI navigation graph.
+ *
+ * This function provides access to the `INPUT_GRAPH`. If the graph has not
+ * been initialized yet, this function will build it. The graph defines how
+ * focus moves between different UI elements (identified by `InputId`) based
+ * on directional input.
+ *
+ * inputs:
+ *     - None
+ *
+ * outputs:
+ *     - &'static HashMap<InputId, InputNode> : A reference to the static navigation graph.
+ */
 fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
     INPUT_GRAPH.get_or_init(|| {
         let mut graph = HashMap::new();
@@ -192,7 +229,11 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
 
 // fn create_progress_bar... removed as it was unused and referred to AppState.progress
 
-// Input mode to determine how to handle user input
+/* InputMode - Defines the current mode of interaction within the TUI.
+ *
+ * The input mode determines how key presses are interpreted, for example,
+ * whether they navigate UI elements, edit text, or interact with a popup.
+ */
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Navigation,
@@ -204,7 +245,32 @@ pub enum InputMode {
     SongIdErrorPopup, // For the error message popup
 }
 
-// AppState to store application state
+/* AppState - Holds the overall state of the TUI application.
+ *
+ * This struct centralizes all data that the TUI needs to render itself
+ * and respond to user interactions. It includes UI parameters, playback status,
+ * progress information, and input field values.
+ *
+ * fields:
+ *     - scale (String): The selected musical scale for generation.
+ *     - style (String): The selected musical style for generation.
+ *     - bpm (String): The selected beats per minute for generation.
+ *     - length (String): The selected length for music generation.
+ *     - seed (String): The seed for random number generation, affecting music output.
+ *     - input_mode (InputMode): The current input mode of the TUI.
+ *     - popup_list_state (ListState): State for managing selection in pop-up lists.
+ *     - scales (Vec<String>): List of available musical scales.
+ *     - styles (Vec<String>): List of available musical styles.
+ *     - lengths (Vec<String>): List of available music lengths.
+ *     - is_playing (bool): True if music is currently playing, false otherwise.
+ *     - current_song_progress (f32): Playback progress of the current song (0.0 to 1.0).
+ *     - current_song_elapsed_secs (f32): Elapsed playback time of the current song in seconds.
+ *     - current_song_duration_secs (f32): Total duration of the current song in seconds.
+ *     - song_loader_input (String): User input for loading a song by ID.
+ *     - song_id_error (Option<String>): Stores an error message if song ID loading fails.
+ *     - current_song_id_display (Option<String>): The ID of the currently playing/loaded song.
+ *     - show_help (bool): True if the help menu should be displayed.
+ */
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub scale: String,
@@ -221,10 +287,10 @@ pub struct AppState {
     pub current_song_progress: f32,
     pub current_song_elapsed_secs: f32,
     pub current_song_duration_secs: f32,
-    pub song_loader_input: String,     // Added for the new song loader input
-    pub song_id_error: Option<String>, // For song ID validation errors
-    pub current_song_id_display: Option<String>, // To display the current song's ID
-    pub show_help: bool, // Added to control help menu visibility
+    pub song_loader_input: String,
+    pub song_id_error: Option<String>,
+    pub current_song_id_display: Option<String>,
+    pub show_help: bool,
 }
 
 impl Default for AppState {
@@ -266,26 +332,48 @@ impl Default for AppState {
             current_song_progress: 0.0,
             current_song_elapsed_secs: 0.0,
             current_song_duration_secs: 0.0,
-            song_loader_input: String::new(), // Initialize the new field
-            song_id_error: None,              // Initialize error as None
-            current_song_id_display: None,     // Initialize as None
-            show_help: false, // Default help menu to hidden
+            song_loader_input: String::new(),
+            song_id_error: None,
+            current_song_id_display: None,
+            show_help: false,
         }
     }
 }
 
-// TUI struct represents the terminal user interface, parameterized by the type of backend (B)
+/* Tui - Manages the terminal user interface for the 8BitBeats application.
+ *
+ * This struct is responsible for initializing and drawing the TUI, handling
+ * user input, and managing the application's visual state (`AppState`).
+ * It is generic over a `Backend` type, allowing it to work with different
+ * terminal backends (e.g., Crossterm).
+ *
+ * fields:
+ *     - terminal (Terminal<B>): The terminal instance used for drawing.
+ *     - current_focus (InputId): The UI element that currently has focus.
+ *     - state (AppState): The current state of the application's UI.
+ *     - editing_original_value (Option<String>): Stores the original value of a field when editing begins.
+ */
 pub struct Tui<B: Backend> {
     terminal: Terminal<B>,
     current_focus: InputId,
     state: AppState,
-    editing_original_value: Option<String>, // To store value before editing starts
+    editing_original_value: Option<String>,
 }
 
-// Define a sample rate const, assuming it's the same as in gen.rs
+// TUI_SAMPLE_RATE: Assumed audio sample rate, used for time calculations in the TUI.
+// This should ideally be consistent with the actual sample rate used in `gen.rs`.
 const TUI_SAMPLE_RATE: f32 = 44100.0;
 
-// Helper function to format duration from seconds to MM:SS string
+/* format_duration - Formats a duration from total seconds into a MM:SS string.
+ *
+ * This is a helper function used to display time values in a user-friendly format.
+ *
+ * inputs:
+ *     - total_seconds (f32): The total duration in seconds.
+ *
+ * outputs:
+ *     - String : The duration formatted as "MM:SS".
+ */
 fn format_duration(total_seconds: f32) -> String {
     let minutes = (total_seconds / 60.0).floor() as u32;
     let seconds = (total_seconds % 60.0).floor() as u32;
@@ -293,7 +381,16 @@ fn format_duration(total_seconds: f32) -> String {
 }
 
 impl<B: Backend> Tui<B> {
-    // Constructor method to create a new Tui instance with the provided backend
+    /* new - Creates a new `Tui` instance.
+     *
+     * Initializes the terminal and sets up the initial state of the TUI.
+     *
+     * inputs:
+     *     - backend (B): The terminal backend to use.
+     *
+     * outputs:
+     *     - Result<Self, Box<dyn std::error::Error>> : The new `Tui` instance or an error.
+     */
     pub fn new(backend: B) -> Result<Self, Box<dyn std::error::Error>> {
         let mut terminal = Terminal::new(backend)?;
         terminal.hide_cursor()?;
@@ -301,54 +398,81 @@ impl<B: Backend> Tui<B> {
             terminal,
             current_focus: InputId::PlayPause,
             state: AppState::default(),
-            editing_original_value: None, // Initialize as None
+            editing_original_value: None,
         })
     }
 
-    // Setup method to initialize raw mode and the alternate screen buffer
+    /* setup - Initializes the terminal for TUI interaction.
+     *
+     * This method enables raw mode and switches to the alternate screen buffer.
+     *
+     * inputs:
+     *     - &mut self
+     *
+     * outputs:
+     *     - Result<(), Box<dyn std::error::Error>> : Ok on success, or an error.
+     */
     pub fn setup(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        enable_raw_mode()?; // Enable raw mode so we can read user input directly
-        let mut stdout = io::stdout(); // Get a handle to the standard output stream
-        execute!(stdout, EnterAlternateScreen)?; // Switch to an alternate screen buffer (for TUI)
+        enable_raw_mode()?;
+        let mut stdout = io::stdout();
+        execute!(stdout, EnterAlternateScreen)?;
         Ok(())
     }
 
-    // Teardown method to clean up after the program finishes
+    /* teardown - Cleans up the terminal after TUI interaction.
+     *
+     * This method disables raw mode, leaves the alternate screen buffer,
+     * and shows the cursor.
+     *
+     * inputs:
+     *     - &mut self
+     *
+     * outputs:
+     *     - Result<(), Box<dyn std::error::Error>> : Ok on success, or an error.
+     */
     pub fn teardown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        disable_raw_mode()?; // Disable raw mode before exiting
-        let mut stdout = io::stdout(); // Get a handle to stdout again
-        execute!(stdout, LeaveAlternateScreen)?; // Leave the alternate screen buffer and return to the normal terminal screen
-        self.terminal.show_cursor()?; // Show the cursor again after exiting
+        disable_raw_mode()?;
+        let mut stdout = io::stdout();
+        execute!(stdout, LeaveAlternateScreen)?;
+        self.terminal.show_cursor()?;
         Ok(())
     }
 
-    // Method to update progress
+    /* update_progress - Updates the song progress information in the TUI state.
+     *
+     * Calculates and stores the current song progress percentage, elapsed time,
+     * and total duration based on sample counts.
+     * It handles cases where the song is paused or has just ended/reset.
+     *
+     * inputs:
+     *     - &mut self
+     *     - current_samples (u64): The number of samples played so far.
+     *     - total_samples (u64): The total number of samples in the song.
+     *
+     * outputs:
+     *     - None
+     */
     pub fn update_progress(&mut self, current_samples: u64, total_samples: u64) {
-        // If the TUI is in a paused state, we generally shouldn't update the elapsed time/progress percentage.
-        // However, we might still want to update the total_song_duration_secs if a new song is loaded (total_samples > 0)
-        // or if it's a reset signal (total_samples == 0).
+        // When paused, only update total duration for new songs; don't change progress/elapsed time.
         if !self.state.is_playing && total_samples > 0 {
-            // If paused and this is a progress update for an actual song (not a reset signal),
-            // only update the duration if it has changed (e.g. a new song loaded paused).
-            // Do not update elapsed_secs or current_song_progress.
             let new_duration_secs = total_samples as f32 / TUI_SAMPLE_RATE;
             if self.state.current_song_duration_secs != new_duration_secs {
                 self.state.current_song_duration_secs = new_duration_secs;
-                // If we just loaded a song paused, progress should be 0
+                // If a new song is loaded paused, reset its progress to 0.
                 self.state.current_song_progress = 0.0;
                 self.state.current_song_elapsed_secs = 0.0;
             }
-            return; // Explicitly stop here to not update visible progress if paused.
+            return; // Do not update visible progress if paused.
         }
 
-        if total_samples == 0 { // Song ended, or was reset, or initial state.
+        if total_samples == 0 { // Song ended, reset, or initial state.
             self.state.current_song_progress = 0.0;
             self.state.current_song_elapsed_secs = 0.0;
             self.state.current_song_duration_secs = 0.0;
         } else {
             self.state.current_song_progress = (current_samples as f32 / total_samples as f32).min(1.0).max(0.0);
             self.state.current_song_elapsed_secs = current_samples as f32 / TUI_SAMPLE_RATE;
-            // Update duration if it's different or was zero. This handles the first progress update for a song.
+            // Ensure duration is updated for the first progress report of a song.
             let new_duration_secs = total_samples as f32 / TUI_SAMPLE_RATE;
             if self.state.current_song_duration_secs == 0.0 || self.state.current_song_duration_secs != new_duration_secs {
                 self.state.current_song_duration_secs = new_duration_secs;
@@ -356,25 +480,42 @@ impl<B: Backend> Tui<B> {
         }
     }
 
-    // Method to set the string for displaying the current song ID
+    /* set_current_song_id_display - Sets the string for displaying the current song ID.
+     *
+     * inputs:
+     *     - &mut self
+     *     - id_display (Option<String>): The song ID string to display, or None to clear it.
+     *
+     * outputs:
+     *     - None
+     */
     pub fn set_current_song_id_display(&mut self, id_display: Option<String>) {
         self.state.current_song_id_display = id_display;
     }
 
-    // Method to draw the user interface on the terminal screen
+    /* draw - Renders the entire TUI to the terminal.
+     *
+     * This is the main rendering loop. It defines the layout of all UI components,
+     * styles them according to the current `AppState` (including focus, input mode,
+     * and playback status), and draws them to the terminal using the provided backend.
+     * It also handles displaying popups and the help menu when active.
+     *
+     * inputs:
+     *     - &mut self
+     *
+     * outputs:
+     *     - Result<(), Box<dyn std::error::Error>> : Ok on success, or an error if drawing fails.
+     */
     pub fn draw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.terminal.draw(|f| {
             static MIN_WIDTH: u16 = 80;
             static MIN_HEIGHT: u16 = 25;
 
-            // Get the full area of the terminal
             let size = f.size();
             let terminal_width = size.width;
             let terminal_height = size.height;
 
-            // Check if terminal size meets minimum requirements
             if terminal_width < MIN_WIDTH || terminal_height < MIN_HEIGHT {
-                // Render a warning message if terminal is too small
                 let warning = format!(
                     "Terminal too small! Minimum size: {}x{}, Current: {}x{}",
                     MIN_WIDTH, MIN_HEIGHT, terminal_width, terminal_height
@@ -387,14 +528,12 @@ impl<B: Backend> Tui<B> {
             }
 
             let title_height = 8; // Title section height
-            let content_height = 24; // Adjusted: Now Playing (8) + Gap (1) + Create New Track (9) + Gap (1) + Load Song (5)
+            let content_height = 24; // Content area: Now Playing (8) + Gap (1) + Create New Track (9) + Gap (1) + Load Song (5)
             let help_hint_height = 1;
             let total_app_content_height = title_height + content_height + help_hint_height;
 
-            // Calculate vertical padding to center the app
             let v_padding = (terminal_height.saturating_sub(total_app_content_height)) / 2;
 
-            // Create top-level layout with vertical padding
             let app_layout = Layout::default()
                 .direction(LayoutDirection::Vertical)
                 .constraints([
@@ -402,7 +541,7 @@ impl<B: Backend> Tui<B> {
                     Constraint::Length(title_height),   // Title
                     Constraint::Length(content_height), // Content
                     Constraint::Length(help_hint_height),// Footer for help hint
-                    Constraint::Min(0),         // Bottom padding (flexible, can be 0)
+                    Constraint::Min(0),                 // Bottom padding (flexible)
                 ])
                 .split(size);
 
@@ -410,7 +549,6 @@ impl<B: Backend> Tui<B> {
             let content_area = app_layout[2];
             let footer_area = app_layout[3];
 
-            // Define your ASCII title
             let ascii_art = [
                 " █████╗       ██████╗ ██╗████████╗   ██████╗ ███████╗ █████╗ ████████╗███████╗",
                 "██╔══██╗      ██╔══██╗██║╚══██╔══╝   ██╔══██╗██╔════╝██╔══██╗╚══██╔══╝██╔════╝",
@@ -422,31 +560,24 @@ impl<B: Backend> Tui<B> {
                 "                       ♪ ♫ ♪  The 8 Bit Music DJ  ♪ ♫ ♪                       ",
             ];
 
-            // Convert each title line into a styled Line
             let title_lines: Vec<Line> = ascii_art
                 .iter()
                 .map(|&line| Line::from(Span::styled(line, Style::default().fg(Color::Blue))))
                 .collect();
 
-            // Create the title Paragraph
             let title_paragraph = Paragraph::new(title_lines)
                 .alignment(Alignment::Center)
                 .add_modifier(Modifier::BOLD);
 
-            // Render the title
             f.render_widget(title_paragraph, title_area);
 
-            // Create centered content area with a percentage of the available width
-            let content_width_percentage = 80; // Use 80% of available width
-            let content_width = (content_area.width as u32 * content_width_percentage / 100) as u16;
+            let content_width_percentage = 80; // Use 80% of available width for content
+            let mut content_width = (content_area.width as u32 * content_width_percentage / 100) as u16;
 
-            // Make sure content width doesn't exceed 100 characters for readability
-            let content_width = std::cmp::min(content_width, 100);
+            content_width = std::cmp::min(content_width, 100); // Max content width of 100 characters
 
-            // Calculate horizontal padding to center content
             let h_padding = (content_area.width.saturating_sub(content_width)) / 2;
 
-            // Create content area with horizontal padding
             let centered_content_area = Rect {
                 x: content_area.x + h_padding,
                 y: content_area.y,
@@ -454,28 +585,27 @@ impl<B: Backend> Tui<B> {
                 height: content_area.height,
             };
 
-            // Split content area vertically
             let panel_layout = Layout::default()
                 .direction(LayoutDirection::Vertical)
                 .constraints([
-                    Constraint::Length(8), // Now Playing
+                    Constraint::Length(8), // Now Playing panel
                     Constraint::Length(1), // Gap
-                    Constraint::Length(9), // Create New Track
-                    Constraint::Length(1), // Gap for new panel
-                    Constraint::Length(5), // Load Song panel (increased from 4 to 5)
+                    Constraint::Length(9), // Create New Track panel
+                    Constraint::Length(1), // Gap
+                    Constraint::Length(5), // Load Song panel
                     Constraint::Min(1),    // Remaining space
                 ])
                 .split(centered_content_area);
 
             let now_playing_area = panel_layout[0];
             let create_track_area = panel_layout[2];
-            let song_loader_area = panel_layout[4]; // Added area for song loader
+            let song_loader_area = panel_layout[4];
 
             let now_playing_block = Block::default().title("Now Playing").borders(Borders::ALL);
             let inner_now_playing = now_playing_block.inner(now_playing_area);
             f.render_widget(now_playing_block, now_playing_area);
 
-            // Now playing content layout - added seed text row
+            // Layout for elements within the "Now Playing" panel
             let now_playing_layout = Layout::default()
                 .direction(LayoutDirection::Vertical)
                 .constraints([
@@ -483,18 +613,17 @@ impl<B: Backend> Tui<B> {
                     Constraint::Length(1), // Progress Bar
                     Constraint::Length(1), // Progress Text (MM:SS / MM:SS)
                     Constraint::Length(1), // Empty space
-                    Constraint::Min(1),    // Controls (takes remaining space)
+                    Constraint::Min(1),    // Controls row
                 ])
                 .margin(1)
                 .split(inner_now_playing);
 
-            // Seed display text
             let song_id_display_text = format!("Song ID: {}", self.state.current_song_id_display.as_deref().unwrap_or("N/A"));
             let song_id_paragraph = Paragraph::new(song_id_display_text)
                 .alignment(Alignment::Center);
             f.render_widget(song_id_paragraph, now_playing_layout[0]);
 
-            // Progress Bar - index adjusted to [1]
+            // Progress Bar
             let progress_percentage = (self.state.current_song_progress * 100.0) as u16;
             let progress_bar = Gauge::default()
                 .block(Block::default())
@@ -503,24 +632,23 @@ impl<B: Backend> Tui<B> {
                 .label(format!("{}%", progress_percentage));
             f.render_widget(progress_bar, now_playing_layout[1]);
 
-            // Progress Text (MM:SS / MM:SS) - index adjusted to [2]
+            // Progress Text (MM:SS / MM:SS)
             let elapsed_str = format_duration(self.state.current_song_elapsed_secs);
             let total_str = format_duration(self.state.current_song_duration_secs);
             let progress_text = Paragraph::new(format!("{} / {}", elapsed_str, total_str))
                 .alignment(Alignment::Center);
             f.render_widget(progress_text, now_playing_layout[2]);
 
-            // Controls layout for Now Playing section - index adjusted to [4]
+            // Layout for playback controls (Rewind, Play/Pause, Skip)
             let control_layout = Layout::default()
                 .direction(LayoutDirection::Horizontal)
                 .constraints([
-                    Constraint::Ratio(1, 3),
-                    Constraint::Ratio(1, 3),
-                    Constraint::Ratio(1, 3),
+                    Constraint::Ratio(1, 3), // Rewind button
+                    Constraint::Ratio(1, 3), // Play/Pause button
+                    Constraint::Ratio(1, 3), // Skip button
                 ])
                 .split(now_playing_layout[4]);
 
-            // Render playback controls
             let rewind_style = if self.current_focus == InputId::Rewind
                 && self.state.input_mode == InputMode::Navigation
             {
@@ -549,7 +677,7 @@ impl<B: Backend> Tui<B> {
                 .alignment(Alignment::Center)
                 .add_modifier(Modifier::BOLD);
 
-            // Dynamically set Play/Pause button text
+            // Dynamically set Play/Pause button text based on playback state
             let play_pause_text = if self.state.is_playing {
                 "[|| Pause]" // Pause symbol
             } else {
@@ -569,7 +697,6 @@ impl<B: Backend> Tui<B> {
             f.render_widget(play_pause, control_layout[1]);
             f.render_widget(skip, control_layout[2]);
 
-            // Create and render the Create New Track panel
             let create_track_block = Block::default()
                 .title("Create New Track")
                 .borders(Borders::ALL);
@@ -577,8 +704,6 @@ impl<B: Backend> Tui<B> {
             let inner_create_track = create_track_block.inner(create_track_area);
             f.render_widget(create_track_block, create_track_area);
 
-            // --- START TARGETED REINSTATEMENT FOR "SCALE" WIDGET ONLY ---
-            // Create the main vertical layout for the panel's content
             let create_track_layout = Layout::default()
                 .direction(LayoutDirection::Vertical)
                 .constraints([
@@ -592,109 +717,67 @@ impl<B: Backend> Tui<B> {
                 ])
                 .split(inner_create_track);
 
-            // Create the horizontal layout for the first row of parameters
             let params_layout_top = Layout::default()
                 .direction(LayoutDirection::Horizontal)
                 .constraints([
                     Constraint::Ratio(1, 4), // Cell for Scale
-                    Constraint::Ratio(1, 4), // Empty cell
-                    Constraint::Ratio(1, 4), // Empty cell
-                    Constraint::Ratio(1, 4), // Cell for Style (will be empty for now)
+                    Constraint::Ratio(1, 4), // Empty cell (spacer)
+                    Constraint::Ratio(1, 4), // Empty cell (spacer)
+                    Constraint::Ratio(1, 4), // Cell for Style
                 ])
-                .split(create_track_layout[0]); // Split the first row
+                .split(create_track_layout[0]);
 
-            // Define style for the Scale widget (needed for focus indication)
+            // Style for the Scale widget, indicating focus or editing state
             let scale_style = if self.current_focus == InputId::Scale {
                 if self.state.input_mode == InputMode::Navigation {
-                    Style::default().fg(Color::Yellow)
+                    Style::default().fg(Color::Yellow) // Focused
                 } else {
-                    Style::default().fg(Color::Green)
+                    Style::default().fg(Color::Green) // Editing or popup active
                 }
             } else {
-                Style::default()
+                Style::default() // Not focused
             };
 
-            // Create the Scale widget Paragraph
             let scale_widget_paragraph =
                 Paragraph::new(format!("Scale: [ {} ▼]", self.state.scale))
                     .style(scale_style)
                     .add_modifier(Modifier::BOLD)
                     .alignment(Alignment::Center);
 
-            // Render ONLY the Scale widget into its cell
             f.render_widget(scale_widget_paragraph, params_layout_top[0]);
 
-            // --- UNCOMMENT THE REST OF THE CREATE NEW TRACK PANEL CONTENT ---
-            // (The following was part of the full reinstatement, now uncommented)
-            let params_layout_bottom = Layout::default()
-                .direction(LayoutDirection::Horizontal)
-                .constraints([
-                    Constraint::Ratio(1, 4),
-                    Constraint::Ratio(1, 4),
-                    Constraint::Ratio(1, 4),
-                    Constraint::Ratio(1, 4),
-                ])
-                .split(create_track_layout[2]);
-
-            // Style definitions for style_style, bpm_style, length_style (scale_style already defined)
-            let style_style = if self.current_focus == InputId::Style {
-                if self.state.input_mode == InputMode::Navigation {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default().fg(Color::Green)
-                }
-            } else {
-                Style::default()
-            };
-
-            let bpm_style = if self.current_focus == InputId::Bpm {
-                if self.state.input_mode == InputMode::Navigation {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default().fg(Color::Green)
-                }
-            } else {
-                Style::default()
-            };
-
-            let length_style = if self.current_focus == InputId::Length {
-                if self.state.input_mode == InputMode::Navigation {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default().fg(Color::Green)
-                }
-            } else {
-                Style::default()
-            };
-
-            // Paragraph definitions for style_param, bpm, length (scale_widget_paragraph already defined as scale)
-            // Renaming scale_widget_paragraph to scale for consistency with original code if needed, or use scale_widget_paragraph directly.
-            // Assuming `scale` was the variable name for the scale paragraph before simplification. Let's use `scale_widget_paragraph` for clarity here.
-
             let style_param = Paragraph::new(format!("Style: [ {} ▼]", self.state.style))
-                .style(style_style)
+                .style(Style::default().fg(Color::Yellow))
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
+            f.render_widget(style_param, params_layout_top[3]);
+
+            let bpm_style = if self.current_focus == InputId::Bpm {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default()
+            };
+
             let bpm = Paragraph::new(format!("BPM: [{}]", self.state.bpm))
                 .style(bpm_style)
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
+            f.render_widget(bpm, create_track_layout[2]);
+
+            let length_style = if self.current_focus == InputId::Length {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default()
+            };
+
             let length = Paragraph::new(format!("Length: [{} ▼]", self.state.length))
                 .style(length_style)
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
-
-            // f.render_widget(scale_widget_paragraph, params_layout_top[0]); // Already rendered
-            f.render_widget(style_param, params_layout_top[3]);
-            f.render_widget(bpm, params_layout_bottom[0]);
-            f.render_widget(length, params_layout_bottom[3]);
+            f.render_widget(length, create_track_layout[4]);
 
             let seed_style = if self.current_focus == InputId::Seed {
-                if self.state.input_mode == InputMode::Navigation {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default().fg(Color::Green)
-                }
+                Style::default().fg(Color::Yellow)
             } else {
                 Style::default()
             };
@@ -709,9 +792,8 @@ impl<B: Backend> Tui<B> {
                 .style(seed_style)
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
-            f.render_widget(seed, create_track_layout[4]);
+            f.render_widget(seed, create_track_layout[6]);
 
-            // Generate button
             let generate_style = if self.current_focus == InputId::Generate
                 && self.state.input_mode == InputMode::Navigation
             {
@@ -725,7 +807,6 @@ impl<B: Backend> Tui<B> {
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
             f.render_widget(generate, create_track_layout[6]);
-            // --- END UNCOMMENT AND RESTORE ---
 
             // Define song_loader_block and inner_song_loader_area early for cursor logic
             let song_loader_block = Block::default()
@@ -741,7 +822,7 @@ impl<B: Backend> Tui<B> {
             {
                 match self.current_focus {
                     InputId::Bpm => {
-                        let bpm_widget_cell_area = params_layout_bottom[0]; // Cell for BPM
+                        let bpm_widget_cell_area = params_layout_top[0]; // Cell for BPM
                         let row_y = create_track_layout[2].y; // Y of the row containing BPM
                         let full_text_content = format!("BPM: [{}]", self.state.bpm);
                         let text_prefix_len = "BPM: [".len() as u16;
@@ -1015,67 +1096,166 @@ impl<B: Backend> Tui<B> {
         Ok(())
     }
 
+    /* get_current_app_state - Returns a clone of the current application state.
+     *
+     * inputs:
+     *     - &self
+     *
+     * outputs:
+     *     - AppState : A copy of the TUI's current `AppState`.
+     */
     pub fn get_current_app_state(&self) -> AppState {
         self.state.clone()
     }
 
+    /* set_app_state - Replaces the current application state with a new one.
+     *
+     * inputs:
+     *     - &mut self
+     *     - new_state (AppState): The new state to apply.
+     *
+     * outputs:
+     *     - None
+     */
     pub fn set_app_state(&mut self, new_state: AppState) {
         self.state = new_state;
     }
 
-    // Method to get the current focused InputId
-    // pub fn current_focus(&self) -> InputId { // Removed as unused
-    //     self.current_focus
-    // }
-
-    // Method to explicitly set the playing state, e.g., after music generation
+    /* set_playing_state - Explicitly sets the playback state (playing or paused).
+     *
+     * This is used, for example, after music generation completes or a song is loaded
+     * to ensure the TUI reflects the correct playback status.
+     *
+     * inputs:
+     *     - &mut self
+     *     - is_playing (bool): True to set to playing, false for paused.
+     *
+     * outputs:
+     *     - None
+     */
     pub fn set_playing_state(&mut self, is_playing: bool) {
         self.state.is_playing = is_playing;
     }
 
+    /* toggle_help - Toggles the visibility of the help menu.
+     *
+     * inputs:
+     *     - &mut self
+     *
+     * outputs:
+     *     - None
+     */
     pub fn toggle_help(&mut self) {
         self.state.show_help = !self.state.show_help;
     }
 
+    /* is_paused - Checks if music playback is currently paused.
+     *
+     * inputs:
+     *     - &self
+     *
+     * outputs:
+     *     - bool : True if playback is paused, false otherwise.
+     */
     pub fn is_paused(&self) -> bool {
         !self.state.is_playing
     }
 
-    // Method to clear the song loader input field
+    /* clear_song_loader_input - Clears the text from the song loader input field.
+     *
+     * inputs:
+     *     - &mut self
+     *
+     * outputs:
+     *     - None
+     */
     pub fn clear_song_loader_input(&mut self) {
         self.state.song_loader_input.clear();
     }
 
-    // Method to set focus to the PlayPause button
+    /* focus_on_play_pause - Sets the UI focus to the Play/Pause button.
+     *
+     * This also ensures the TUI is in Navigation mode.
+     *
+     * inputs:
+     *     - &mut self
+     *
+     * outputs:
+     *     - None
+     */
     pub fn focus_on_play_pause(&mut self) {
         self.current_focus = InputId::PlayPause;
-        self.state.input_mode = InputMode::Navigation; // Ensure navigation mode
+        self.state.input_mode = InputMode::Navigation; // Ensure navigation mode after focusing.
     }
 
-    // Method to show a song ID error
+    /* show_song_id_error - Displays an error message related to song ID loading.
+     *
+     * Sets the TUI to `SongIdErrorPopup` mode to show the message.
+     *
+     * inputs:
+     *     - &mut self
+     *     - error_message (String): The error message to display.
+     *
+     * outputs:
+     *     - None
+     */
     pub fn show_song_id_error(&mut self, error_message: String) {
         self.state.song_id_error = Some(error_message);
         self.state.input_mode = InputMode::SongIdErrorPopup;
     }
 
-    // Method to reset progress for the currently loaded song (e.g., on rewind)
+    /* reset_current_song_progress - Resets playback progress for the current song (e.g., on rewind).
+     *
+     * This visually resets the elapsed time and progress bar to the beginning.
+     * The total song duration remains unchanged.
+     * Typically, playback is set to `true` after a rewind.
+     *
+     * inputs:
+     *     - &mut self
+     *
+     * outputs:
+     *     - None
+     */
     pub fn reset_current_song_progress(&mut self) {
         // Only reset the current playback position visually.
         // The actual duration and definitive progress comes from music_service.
         // The existing current_song_duration_secs remains, so "MM:SS / TotalDuration" looks consistent.
         self.state.current_song_elapsed_secs = 0.0;
         self.state.current_song_progress = 0.0;
-        self.state.is_playing = true; // Ensure playing state is true after rewind typically
+        self.state.is_playing = true; // Ensure playing state is true after rewind.
     }
 
-    // Method to reset progress completely for a new song
+    /* reset_progress_for_new_song - Resets all progress information for a new song.
+     *
+     * Calls `update_progress(0,0)` to clear times and progress percentage.
+     * Note: Setting `is_playing` or clearing `current_song_id_display` is typically
+     * handled by the main application logic when a new song starts.
+     *
+     * inputs:
+     *     - &mut self
+     *
+     * outputs:
+     *     - None
+     */
     pub fn reset_progress_for_new_song(&mut self) {
         self.update_progress(0, 0);
-        // Optionally, also ensure is_playing is set appropriately, though main.rs usually handles this.
-        // self.state.current_song_id_display = None; // Clearing ID display is handled by main.rs or progress updates
+        // self.state.current_song_id_display = None; // Clearing ID is handled by main.rs/progress updates
     }
 
-    // Method to handle user input
+    /* handle_input - Processes user input events from the terminal.
+     *
+     * This method polls for keyboard events. Based on the current `InputMode`
+     * (e.g., Navigation, Editing, Popup) and the specific key pressed, it determines
+     * the appropriate `UserAction` to return. It handles global shortcuts (like Quit, ToggleHelp),
+     * navigation between UI elements, text input into fields, interaction with popups,
+     * and actions related to music control and generation.
+     *
+     * inputs:
+     *     - &mut self
+     *
+     * outputs:
+     *     - std::io::Result<UserAction> : The determined `UserAction` or an I/O error.
+     */
     pub fn handle_input(&mut self) -> std::io::Result<UserAction> {
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
@@ -1354,10 +1534,24 @@ impl<B: Backend> Tui<B> {
     }
 }
 
-// Reinstate the next_focus function
+/* next_focus - Determines the next UI element to focus on based on navigation direction.
+ *
+ * Given the currently focused element (`current`) and a navigation `Direction`,
+ * this function consults the `INPUT_GRAPH` to find the `InputId` of the
+ * neighboring element in that direction. If no neighbor exists in the given
+ * direction, focus remains on the current element.
+ *
+ * inputs:
+ *     - current (InputId): The `InputId` of the currently focused UI element.
+ *     - direction (Direction): The direction of navigation.
+ *
+ * outputs:
+ *     - InputId : The `InputId` of the next element to focus, or the current one if no move is possible.
+ */
 fn next_focus(current: InputId, direction: Direction) -> InputId {
-    get_input_graph()
+    let graph = get_input_graph();
+    graph
         .get(&current)
         .and_then(|node| node.neighbors.get(&direction).copied())
-        .unwrap_or(current)
+        .unwrap_or(current) // If no neighbor, stay on the current input
 }
