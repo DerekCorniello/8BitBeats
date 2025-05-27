@@ -746,14 +746,38 @@ impl<B: Backend> Tui<B> {
 
             f.render_widget(scale_widget_paragraph, params_layout_top[0]);
 
+            let style_style = if self.current_focus == InputId::Style {
+                if self.state.input_mode == InputMode::Navigation {
+                    Style::default().fg(Color::Yellow) // Focused
+                } else { // Covers StylePopup mode
+                    Style::default().fg(Color::Green) // Popup active
+                }
+            } else {
+                Style::default() // Not focused
+            };
             let style_param = Paragraph::new(format!("Style: [ {} ▼]", self.state.style))
-                .style(Style::default().fg(Color::Yellow))
+                .style(style_style) // Apply conditional style
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
             f.render_widget(style_param, params_layout_top[3]);
 
+            // Layout for BPM and Length (second row of parameters)
+            let params_layout_bottom = Layout::default()
+                .direction(LayoutDirection::Horizontal)
+                .constraints([
+                    Constraint::Ratio(1, 4), // Cell for BPM
+                    Constraint::Ratio(1, 4), // Empty cell (spacer)
+                    Constraint::Ratio(1, 4), // Empty cell (spacer)
+                    Constraint::Ratio(1, 4), // Cell for Length
+                ])
+                .split(create_track_layout[2]); // Use the second parameter row
+
             let bpm_style = if self.current_focus == InputId::Bpm {
-                Style::default().fg(Color::Yellow)
+                if self.state.input_mode == InputMode::Navigation {
+                    Style::default().fg(Color::Yellow)
+                } else { // Editing
+                    Style::default().fg(Color::Green)
+                }
             } else {
                 Style::default()
             };
@@ -762,10 +786,14 @@ impl<B: Backend> Tui<B> {
                 .style(bpm_style)
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
-            f.render_widget(bpm, create_track_layout[2]);
+            f.render_widget(bpm, params_layout_bottom[0]); // Render BPM in the first cell of the bottom params row
 
             let length_style = if self.current_focus == InputId::Length {
-                Style::default().fg(Color::Yellow)
+                 if self.state.input_mode == InputMode::Navigation {
+                    Style::default().fg(Color::Yellow)
+                } else { // Popup active
+                    Style::default().fg(Color::Green)
+                }
             } else {
                 Style::default()
             };
@@ -774,10 +802,14 @@ impl<B: Backend> Tui<B> {
                 .style(length_style)
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
-            f.render_widget(length, create_track_layout[4]);
+            f.render_widget(length, params_layout_bottom[3]); // Render Length in the fourth cell of the bottom params row
 
             let seed_style = if self.current_focus == InputId::Seed {
-                Style::default().fg(Color::Yellow)
+                if self.state.input_mode == InputMode::Navigation {
+                    Style::default().fg(Color::Yellow)
+                } else { // Editing
+                    Style::default().fg(Color::Green)
+                }
             } else {
                 Style::default()
             };
@@ -792,7 +824,7 @@ impl<B: Backend> Tui<B> {
                 .style(seed_style)
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
-            f.render_widget(seed, create_track_layout[6]);
+            f.render_widget(seed, create_track_layout[4]); // Render Seed in its dedicated row
 
             let generate_style = if self.current_focus == InputId::Generate
                 && self.state.input_mode == InputMode::Navigation
@@ -806,7 +838,7 @@ impl<B: Backend> Tui<B> {
                 .style(generate_style)
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
-            f.render_widget(generate, create_track_layout[6]);
+            f.render_widget(generate, create_track_layout[6]); // Render Generate in its dedicated row
 
             // Define song_loader_block and inner_song_loader_area early for cursor logic
             let song_loader_block = Block::default()
@@ -822,8 +854,7 @@ impl<B: Backend> Tui<B> {
             {
                 match self.current_focus {
                     InputId::Bpm => {
-                        let bpm_widget_cell_area = params_layout_top[0]; // Cell for BPM
-                        let row_y = create_track_layout[2].y; // Y of the row containing BPM
+                        let bpm_widget_cell_area = params_layout_bottom[0]; // Use the new layout cell for BPM
                         let full_text_content = format!("BPM: [{}]", self.state.bpm);
                         let text_prefix_len = "BPM: [".len() as u16;
 
@@ -833,11 +864,11 @@ impl<B: Backend> Tui<B> {
 
                         let x =
                             centered_text_start_x + text_prefix_len + self.state.bpm.len() as u16;
-                        let y = row_y;
+                        let y = bpm_widget_cell_area.y; // Use y from the cell area
                         f.set_cursor(x, y);
                     }
                     InputId::Seed => {
-                        let seed_widget_row_area = create_track_layout[4]; // Row for Seed
+                        let seed_widget_row_area = create_track_layout[4]; // Row for Seed (now correct)
                         let text_prefix_len = "Seed (optional): [".len() as u16;
                         // seed_display_string is defined above in the rendering part
                         let centered_text_start_x = seed_widget_row_area.x
