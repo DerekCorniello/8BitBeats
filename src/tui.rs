@@ -1,6 +1,5 @@
-// use crate::gen::{get_music_sender, pause_music, resume_music, start_music_in_thread}; // Removed these unused imports
 use crossterm::{
-    event::{self, Event, KeyCode}, // Removed KeyEvent, KeyModifiers
+    event::{self, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -9,15 +8,13 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction as LayoutDirection, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph}, // Added List, ListItem
+    widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph},
     Terminal,
 };
 
 use std::{collections::HashMap, io, sync::OnceLock};
 
-// Removed: use std::time::Instant;
 
-// UserAction defines the set of actions a user can perform within the TUI.
 /* UserAction - Represents all possible actions a user can trigger in the TUI.
  *
  * This enum is used to communicate user intentions from the input handling logic
@@ -34,12 +31,13 @@ pub enum UserAction {
     CyclePopupOption,
     SelectPopupItem,
     GenerateMusic,
+    GenerateRandomMusic,
     NoOp,
-    AttemptLoadSong, // Renamed from LoadAndPlaySong
-    CloseSongIdErrorPopup, // To close the error popup
-    RewindSong, // Added for rewind
-    FastForwardSong, // Added for fast-forward
-    ToggleHelp, // Added for help menu
+    AttemptLoadSong,
+    CloseSongIdErrorPopup,
+    RewindSong,
+    FastForwardSong,
+    ToggleHelp,
 }
 
 /* Direction - Represents navigational directions within the TUI.
@@ -70,6 +68,7 @@ pub enum InputId {
     Length,
     Seed,
     Generate,
+    GenerateRandom,
     SongLoader,
 }
 
@@ -204,9 +203,21 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
             InputNode {
                 neighbors: HashMap::from([
                     (Direction::Up, InputId::Seed),
-                    (Direction::Down, InputId::SongLoader),
+                    (Direction::Down, InputId::GenerateRandom),
                     (Direction::Left, InputId::Generate),
                     (Direction::Right, InputId::Generate),
+                ]),
+            },
+        );
+
+        graph.insert(
+            InputId::GenerateRandom,
+            InputNode {
+                neighbors: HashMap::from([
+                    (Direction::Up, InputId::Generate),
+                    (Direction::Down, InputId::SongLoader),
+                    (Direction::Left, InputId::GenerateRandom),
+                    (Direction::Right, InputId::GenerateRandom),
                 ]),
             },
         );
@@ -215,7 +226,7 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
             InputId::SongLoader,
             InputNode {
                 neighbors: HashMap::from([
-                    (Direction::Up, InputId::Generate),
+                    (Direction::Up, InputId::GenerateRandom),
                     (Direction::Down, InputId::SongLoader),
                     (Direction::Left, InputId::SongLoader),
                     (Direction::Right, InputId::SongLoader),
@@ -226,8 +237,6 @@ fn get_input_graph() -> &'static HashMap<InputId, InputNode> {
         graph
     })
 }
-
-// fn create_progress_bar... removed as it was unused and referred to AppState.progress
 
 /* InputMode - Defines the current mode of interaction within the TUI.
  *
@@ -242,7 +251,7 @@ pub enum InputMode {
     StylePopup,
     LengthPopup,
     SongLoaderEditing,
-    SongIdErrorPopup, // For the error message popup
+    SongIdErrorPopup,
 }
 
 /* AppState - Holds the overall state of the TUI application.
@@ -470,7 +479,7 @@ impl<B: Backend> Tui<B> {
             self.state.current_song_elapsed_secs = 0.0;
             self.state.current_song_duration_secs = 0.0;
         } else {
-            self.state.current_song_progress = (current_samples as f32 / total_samples as f32).min(1.0).max(0.0);
+            self.state.current_song_progress = (current_samples as f32 / total_samples as f32).clamp(0.0, 1.0);
             self.state.current_song_elapsed_secs = current_samples as f32 / TUI_SAMPLE_RATE;
             // Ensure duration is updated for the first progress report of a song.
             let new_duration_secs = total_samples as f32 / TUI_SAMPLE_RATE;
@@ -590,7 +599,7 @@ impl<B: Backend> Tui<B> {
                 .constraints([
                     Constraint::Length(8), // Now Playing panel
                     Constraint::Length(1), // Gap
-                    Constraint::Length(9), // Create New Track panel
+                    Constraint::Length(11), // Create New Track panel
                     Constraint::Length(1), // Gap
                     Constraint::Length(5), // Load Song panel
                     Constraint::Min(1),    // Remaining space
@@ -714,6 +723,8 @@ impl<B: Backend> Tui<B> {
                     Constraint::Length(1), // Seed row
                     Constraint::Length(1), // Space
                     Constraint::Length(1), // Generate button
+                    Constraint::Length(1), // Space
+                    Constraint::Length(1), // Generate random button
                 ])
                 .split(inner_create_track);
 
@@ -748,9 +759,9 @@ impl<B: Backend> Tui<B> {
 
             let style_style = if self.current_focus == InputId::Style {
                 if self.state.input_mode == InputMode::Navigation {
-                    Style::default().fg(Color::Yellow) // Focused
-                } else { // Covers StylePopup mode
-                    Style::default().fg(Color::Green) // Popup active
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::Green)
                 }
             } else {
                 Style::default() // Not focused
@@ -770,7 +781,7 @@ impl<B: Backend> Tui<B> {
                     Constraint::Ratio(1, 4), // Empty cell (spacer)
                     Constraint::Ratio(1, 4), // Cell for Length
                 ])
-                .split(create_track_layout[2]); // Use the second parameter row
+                .split(create_track_layout[3]); // Use the second parameter row
 
             let bpm_style = if self.current_focus == InputId::Bpm {
                 if self.state.input_mode == InputMode::Navigation {
@@ -824,7 +835,7 @@ impl<B: Backend> Tui<B> {
                 .style(seed_style)
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
-            f.render_widget(seed, create_track_layout[4]); // Render Seed in its dedicated row
+            f.render_widget(seed, create_track_layout[5]); // Render Seed in its dedicated row
 
             let generate_style = if self.current_focus == InputId::Generate
                 && self.state.input_mode == InputMode::Navigation
@@ -839,6 +850,20 @@ impl<B: Backend> Tui<B> {
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
             f.render_widget(generate, create_track_layout[6]); // Render Generate in its dedicated row
+
+            let generate_style = if self.current_focus == InputId::GenerateRandom
+                && self.state.input_mode == InputMode::Navigation
+            {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default()
+            };
+
+            let generate_random = Paragraph::new("[♫ Generate Random]")
+                .style(generate_style)
+                .add_modifier(Modifier::BOLD)
+                .alignment(Alignment::Center);
+            f.render_widget(generate_random, create_track_layout[8]); // Render GenerateRandom in its dedicated row
 
             // Define song_loader_block and inner_song_loader_area early for cursor logic
             let song_loader_block = Block::default()
@@ -1370,6 +1395,7 @@ impl<B: Backend> Tui<B> {
                                     Ok(UserAction::SwitchToEditing)
                                 }
                                 InputId::Generate => Ok(UserAction::GenerateMusic),
+                                InputId::GenerateRandom => Ok(UserAction::GenerateRandomMusic),
                                 InputId::SongLoader => {
                                     // Added SongLoader Enter in Navigation mode
                                     self.editing_original_value =
