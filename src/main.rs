@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     use crossterm::event;
     use std::time::{Duration, Instant};
 
-    let frame_duration = Duration::from_millis(16); // ~60 FPS
+    let frame_duration = Duration::from_millis(16);
     let mut last_frame = Instant::now();
 
     'main: loop {

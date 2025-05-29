@@ -1284,7 +1284,7 @@ impl<B: Backend> Tui<B> {
     /* reset_progress_for_new_song - Resets all progress information for a new song.
      *
      * Calls `update_progress(0,0)` to clear times and progress percentage.
-     * Note: Setting `is_playing` or clearing `current_song_id_display` is typically
+
      * handled by the main application logic when a new song starts.
      *
      * inputs:

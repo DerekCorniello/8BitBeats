@@ -29,13 +29,13 @@ fn play_progression(prog_name: String, root_note: u8, chord_duration: f32) -> (V
     let (progression_chords, progression_root_notes) =
         progs::get_progression(prog_name, root_note, chord_duration);
 
-    // Combine all chord samples
+
     let mut audio_sequence = Vec::new();
     for chord in progression_chords {
         audio_sequence.extend_from_slice(&chord);
     }
 
-    // Return the sequence, its duration, and the root notes
+
     (audio_sequence, progression_root_notes)
 }
 
@@ -95,7 +95,6 @@ pub fn get_bass_line(
         let chord_root = chord_root_notes[current_chord_index];
 
         // Play bass note one octave lower than the chord root.
-        // If chord_root is C1 (MIDI 12) or higher, subtract 12. Otherwise, use chord_root.
         let bass_note_midi = if chord_root >= 12 {
             chord_root - 12
         } else {
@@ -106,7 +105,7 @@ pub fn get_bass_line(
         let time = (i % samples_per_chord) as f32 / SAMPLE_RATE as f32;
         let sample = (time * bass_note_freq * 2.0 * std::f32::consts::PI).sin();
 
-        bass_line.push(sample * 0.6); // Bass notes are often attenuated or shaped differently.
+        bass_line.push(sample * 0.6);
     }
 
     bass_line
@@ -599,7 +598,7 @@ pub fn run_music_service(
             }
             thread::sleep(Duration::from_millis(100));
         }
-        // TODO: Loop here?
+
     });
 }
 
