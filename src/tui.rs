@@ -464,32 +464,30 @@ impl<B: Backend> Tui<B> {
      *     - None
      */
     pub fn update_progress(&mut self, current_samples: u64, total_samples: u64) {
-        // When paused, only update total duration for new songs; don't change progress/elapsed time.
-        if !self.state.is_playing && total_samples > 0 {
-            let new_duration_secs = total_samples as f32 / TUI_SAMPLE_RATE;
-            if self.state.current_song_duration_secs != new_duration_secs {
-                self.state.current_song_duration_secs = new_duration_secs;
-                // If a new song is loaded paused, reset its progress to 0.
-                self.state.current_song_progress = 0.0;
-                self.state.current_song_elapsed_secs = 0.0;
+        // Always update the duration if total_samples is valid and has changed
+        if total_samples > 0 {
+            let new_duration = total_samples as f32 / TUI_SAMPLE_RATE;
+            if (self.state.current_song_duration_secs - new_duration).abs() > f32::EPSILON {
+                self.state.current_song_duration_secs = new_duration;
             }
-            return; // Do not update visible progress if paused.
-        }
-
-        if total_samples == 0 { // Song ended, reset, or initial state.
+            
+            // Calculate progress and update if changed significantly
+            let progress = current_samples as f32 / total_samples as f32;
+            if (progress - self.state.current_song_progress).abs() > 0.001 {
+                self.state.current_song_progress = progress;
+                
+                // Update elapsed time based on samples
+                let new_elapsed = current_samples as f32 / TUI_SAMPLE_RATE;
+                if (new_elapsed - self.state.current_song_elapsed_secs).abs() > 0.05 {
+                    self.state.current_song_elapsed_secs = new_elapsed;
+                }
+            }
+        } else if total_samples == 0 && current_samples == 0 {
+            // Reset progress if we get zeros (song ended or reset)
             self.state.current_song_progress = 0.0;
             self.state.current_song_elapsed_secs = 0.0;
             self.state.current_song_duration_secs = 0.0;
-        } else {
-            self.state.current_song_progress = (current_samples as f32 / total_samples as f32).clamp(0.0, 1.0);
-            self.state.current_song_elapsed_secs = current_samples as f32 / TUI_SAMPLE_RATE;
-            // Ensure duration is updated for the first progress report of a song.
-            let new_duration_secs = total_samples as f32 / TUI_SAMPLE_RATE;
-            if self.state.current_song_duration_secs == 0.0 || self.state.current_song_duration_secs != new_duration_secs {
-                self.state.current_song_duration_secs = new_duration_secs;
-            }
-        }
-    }
+        }    }
 
     /* set_current_song_id_display - Sets the string for displaying the current song ID.
      *

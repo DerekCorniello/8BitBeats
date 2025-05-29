@@ -169,6 +169,9 @@ pub struct MusicPlayer {
     samples_played_at_pause: u64,
     should_terminate: bool,
     is_manually_paused: bool,
+    last_progress_update: Instant,
+    was_paused: bool,
+    last_reported_samples: u64,
 }
 
 impl MusicPlayer {
@@ -200,6 +203,9 @@ impl MusicPlayer {
             samples_played_at_pause: 0,
             should_terminate: false,
             is_manually_paused: false,
+            last_progress_update: Instant::now(),
+            was_paused: false,
+            last_reported_samples: 0,
         }
     }
 
@@ -236,6 +242,7 @@ impl MusicPlayer {
         // Auto-play unless manually paused
         if !self.is_manually_paused && self.total_samples > 0 {
             self.playback_start_time = Some(Instant::now());
+            self.last_progress_update = Instant::now();
             self.sink.play();
         }
     }
@@ -387,12 +394,14 @@ pub fn run_music_service(
     receiver: CrossbeamReceiver<MusicControl>,
     progress_sender: CrossbeamSender<MusicProgress>,
 ) {
-    const SAMPLE_RATE_PROGRESS: f32 = 44100.0; // For progress calculation (as f32)
+    const SAMPLE_RATE_PROGRESS: f32 = SAMPLE_RATE as f32; // Use the same sample rate as audio generation
+    const PROGRESS_UPDATE_INTERVAL: Duration = Duration::from_millis(33); // Update progress every ~33ms for ~30fps updates
+    const MIN_PROGRESS_DELTA: u64 = (SAMPLE_RATE_PROGRESS * 0.05) as u64; // Minimum 50ms change to report
 
     thread::spawn(move || {
         let mut player = MusicPlayer::new(receiver);
         let mut current_app_state_for_generation = initial_app_state;
-        let actual_seed_for_current_song: u64;
+        let mut actual_seed_for_current_song: u64;
 
         // Initial audio generation based on initial_app_state
         {
@@ -416,12 +425,19 @@ pub fn run_music_service(
                     Ok(MusicControl::Pause) => {
                         player.is_manually_paused = true;
                         if !player.sink.is_paused() && player.playback_start_time.is_some() {
-                            let elapsed_since_last_play =
-                                player.playback_start_time.unwrap().elapsed();
-                            player.samples_played_at_pause +=
-                                (elapsed_since_last_play.as_secs_f32() * SAMPLE_RATE_PROGRESS)
-                                    as u64;
+                            let elapsed_since_last_play = player.playback_start_time.unwrap().elapsed();
+                            player.samples_played_at_pause = player.samples_played_at_pause
+                                .saturating_add((elapsed_since_last_play.as_secs_f32() * SAMPLE_RATE_PROGRESS) as u64)
+                                .min(player.total_samples);
                             player.playback_start_time = None;
+                            
+                            // Send immediate update when pausing
+                            let _ = progress_sender.try_send(MusicProgress {
+                                current_samples: player.samples_played_at_pause,
+                                total_samples: player.total_samples,
+                                actual_seed: actual_seed_for_current_song,
+                                app_state: None,
+                            });
                         }
                         player.sink.pause();
                     }
@@ -429,7 +445,16 @@ pub fn run_music_service(
                         player.is_manually_paused = false;
                         if player.sink.is_paused() && player.total_samples > 0 {
                             player.playback_start_time = Some(Instant::now());
+                            player.last_progress_update = Instant::now();
                             player.sink.play();
+                            
+                            // Send immediate update when resuming
+                            let _ = progress_sender.try_send(MusicProgress {
+                                current_samples: player.samples_played_at_pause,
+                                total_samples: player.total_samples,
+                                actual_seed: actual_seed_for_current_song,
+                                app_state: None,
+                            });
                         }
                     }
                     Ok(MusicControl::Rewind) => {
@@ -470,98 +495,105 @@ pub fn run_music_service(
 
             // Progress Reporting
             if player.total_samples > 0 && !player.should_terminate {
-                let mut current_display_samples = player.samples_played_at_pause;
-                if !player.sink.is_paused() && player.playback_start_time.is_some() {
-                    let elapsed_since_current_play = player.playback_start_time.unwrap().elapsed();
-                    current_display_samples +=
-                        (elapsed_since_current_play.as_secs_f32() * SAMPLE_RATE_PROGRESS) as u64;
-                }
-                current_display_samples = current_display_samples.min(player.total_samples);
+                let now = Instant::now();
+                let should_update = match (player.playback_start_time.is_some(), player.sink.is_paused()) {
+                    (true, false) => {
+                        // If playing, check if enough time has passed since last update
+                        now.duration_since(player.last_progress_update) >= PROGRESS_UPDATE_INTERVAL
+                    }
+                    (_, true) => {
+                        // If paused, only update if we haven't sent the paused state yet
+                        player.last_reported_samples != player.samples_played_at_pause
+                    }
+                    _ => false,
+                };
 
-                let send_result = progress_sender.send(MusicProgress {
-                    current_samples: current_display_samples,
-                    total_samples: player.total_samples,
-                    actual_seed: actual_seed_for_current_song,
-                    app_state: None,
-                });
-                if send_result.is_err() {
-                    player.should_terminate = true;
-                }
-
-                if current_display_samples >= player.total_samples && !player.sink.is_paused() {
-                    player.sink.pause();
-                    player.playback_start_time = None;
-                    player.samples_played_at_pause = player.total_samples;
-
-                    // If not manually paused, generate a new song
-                    if !player.is_manually_paused {
-                        let new_app_state = if current_app_state_for_generation.is_random {
-                            // Create a completely new random state
-                            let mut rng = rand::thread_rng();
-                            let mut new_state = current_app_state_for_generation.clone();
-
-                            // Randomize parameters
-                            new_state.scale = [
-                                "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
-                            ]
-                            .choose(&mut rng)
-                            .unwrap()
-                            .to_string();
-
-                            new_state.style = [
-                                "Pop",
-                                "Rock",
-                                "Jazz",
-                                "Blues",
-                                "Electronic",
-                                "Ambient",
-                                "Classical",
-                                "Folk",
-                                "Metal",
-                                "Reggae",
-                            ]
-                            .choose(&mut rng)
-                            .unwrap()
-                            .to_string();
-
-                            new_state.bpm = rng.gen_range(60..=180).to_string();
-                            new_state.length = ["1 min", "2 min", "3 min", "5 min", "10 min"]
-                                .choose(&mut rng)
-                                .unwrap()
-                                .to_string();
-                            new_state.seed = "".to_string(); // New random seed
-                            new_state
+                if should_update {
+                    let current_samples = if let Some(start_time) = player.playback_start_time {
+                        if player.sink.is_paused() {
+                            player.samples_played_at_pause
                         } else {
-                            // Create a new app state with the same parameters but a new random seed
-                            let mut new_state = current_app_state_for_generation.clone();
-                            new_state.seed = "".to_string(); // This will trigger a new random seed
-                            new_state
-                        };
+                            let elapsed = now.duration_since(start_time);
+                            let new_samples = player.samples_played_at_pause.saturating_add(
+                                (elapsed.as_secs_f64() * SAMPLE_RATE_PROGRESS as f64) as u64,
+                            );
+                            new_samples.min(player.total_samples)
+                        }
+                    } else {
+                        player.samples_played_at_pause
+                    };
 
-                        // Generate new audio
-                        let (audio_data, sample_rate, seed) =
-                            generate_audio_from_state(&new_app_state);
-
-                        // Update the current seed
-                        let actual_seed_for_current_song = seed;
-
-                        // Play the new audio
-                        player.play_audio(audio_data, sample_rate);
-
-                        // Reset playback state
-                        player.is_manually_paused = false;
-                        player.samples_played_at_pause = 0;
-
-                        // Send progress update with the new app state
-                        let _ = progress_sender.send(MusicProgress {
-                            current_samples: 0,
+                    // Always send updates when changing play/pause state
+                    // Otherwise, only send if we have a significant change in progress
+                    let last_samples = player.last_reported_samples;
+                    if player.sink.is_paused() != player.was_paused ||
+                       (current_samples as i64 - last_samples as i64).abs() as u64 > MIN_PROGRESS_DELTA
+                    {
+                        let _ = progress_sender.try_send(MusicProgress {
+                            current_samples,
                             total_samples: player.total_samples,
                             actual_seed: actual_seed_for_current_song,
-                            app_state: Some(new_app_state.clone()),
+                            app_state: None,
                         });
+                        player.last_reported_samples = current_samples;
+                        player.was_paused = player.sink.is_paused();
+                    }
+                    player.last_progress_update = now;
+                    
+                    // Check if we've reached the end of the current song
+                    if current_samples >= player.total_samples && !player.sink.is_paused() {
+                        player.sink.pause();
+                        player.playback_start_time = None;
+                        player.samples_played_at_pause = player.total_samples;
 
-                        // Update the current app state for the next iteration
-                        current_app_state_for_generation = new_app_state;
+                        // If not manually paused, generate a new song
+                        if !player.is_manually_paused {
+                            let new_app_state = if current_app_state_for_generation.is_random {
+                                // Create a completely new random state
+                                let mut rng = rand::thread_rng();
+                                let mut new_state = current_app_state_for_generation.clone();
+                                new_state.scale = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+                                    .choose(&mut rng)
+                                    .unwrap()
+                                    .to_string();
+                                new_state.style = ["Pop", "Rock", "Jazz", "Blues", "Electronic", "Ambient", "Classical", "Folk", "Metal", "Reggae"]
+                                    .choose(&mut rng)
+                                    .unwrap()
+                                    .to_string();
+                                new_state.length = ["1 min", "2 min", "3 min", "5 min", "10 min"]
+                                    .choose(&mut rng)
+                                    .unwrap()
+                                    .to_string();
+                                new_state.bpm = rng.gen_range(60..180).to_string();
+                                new_state.seed = rand::random::<u64>().to_string();
+                                new_state
+                            } else {
+                                // Reuse the current state but with a new seed
+                                let mut new_state = current_app_state_for_generation.clone();
+                                new_state.seed = rand::random::<u64>().to_string();
+                                new_state
+                            };
+
+                            // Generate and play new audio
+                            let (audio_data, sample_rate, seed) = generate_audio_from_state(&new_app_state);
+                            actual_seed_for_current_song = seed;
+                            player.play_audio(audio_data, sample_rate);
+                            
+                            // Update the current app state
+                            current_app_state_for_generation = new_app_state;
+                            
+                            // Reset playback state
+                            player.is_manually_paused = false;
+                            player.samples_played_at_pause = 0;
+
+                            // Send progress update with new state
+                            let _ = progress_sender.send(MusicProgress {
+                                current_samples: 0,
+                                total_samples: player.total_samples,
+                                actual_seed: actual_seed_for_current_song,
+                                app_state: Some(current_app_state_for_generation.clone()),
+                            });
+                        }
                     }
                 }
             }
