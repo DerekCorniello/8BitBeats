@@ -40,13 +40,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut music_sender_option: Option<CrossbeamSender<MusicControl>> =
         Some(music_control_sender.clone());
 
-    // Music generation is manually triggered by the user at the start
     'main: loop {
         tui.draw()?;
 
         // Check for progress updates from the music service
         if let Ok(progress) = progress_receiver.try_recv() {
             tui.update_progress(progress.current_samples, progress.total_samples);
+
+            // If we received a new app state (happens when a new song is generated)
+            if let Some(new_app_state) = progress.app_state {
+                tui.set_app_state(new_app_state);
+            }
 
             // If a song was just generated, its ID display might not be set yet.
             // We use the actual_seed from progress to form it.
@@ -108,6 +112,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 app_state_clone.current_song_progress = 0.0;
                 app_state_clone.current_song_elapsed_secs = 0.0;
                 app_state_clone.current_song_duration_secs = 0.0;
+                app_state_clone.is_playing = true; // Ensure we start in playing state
 
                 let (new_music_sender, new_music_receiver) =
                     crossbeam_channel::unbounded::<MusicControl>();
@@ -141,6 +146,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 app_state_clone.current_song_progress = 0.0;
                 app_state_clone.current_song_elapsed_secs = 0.0;
                 app_state_clone.current_song_duration_secs = 0.0;
+                app_state_clone.is_random = false;
+                app_state_clone.is_playing = true; // Ensure we start in playing state
 
                 let (new_music_sender, new_music_receiver) =
                     crossbeam_channel::unbounded::<MusicControl>();
@@ -171,11 +178,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 tui.set_current_song_id_display(None); // Clear old song ID immediately
 
                 let mut rng = rand::thread_rng();
-                let mut app_state_clone = tui.get_current_app_state(); // Make mutable
-                                                                       // Clear progress fields in the clone to ensure gen_music_service starts fresh
+                let mut app_state_clone = tui.get_current_app_state();
+
+                // Clear progress fields in the clone to ensure gen_music_service starts fresh
                 app_state_clone.current_song_progress = 0.0;
                 app_state_clone.current_song_elapsed_secs = 0.0;
                 app_state_clone.current_song_duration_secs = 0.0;
+                app_state_clone.is_random = true;
+                app_state_clone.is_playing = true; // Ensure we start in playing state
                 app_state_clone.scale = [
                     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
                 ]

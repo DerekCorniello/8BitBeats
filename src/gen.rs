@@ -2,7 +2,7 @@ use crate::melodies;
 use crate::progs;
 use crate::tui::AppState;
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{prelude::SliceRandom, rngs::StdRng, Rng, SeedableRng};
 use rodio::{buffer::SamplesBuffer, OutputStream, Sink};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -132,11 +132,13 @@ pub enum MusicControl {
  *     - current_samples (u64): Number of audio samples played so far.
  *     - total_samples (u64): Total number of audio samples in the current song.
  *     - actual_seed (u64): The seed value that was actually used to generate the current song.
+ *     - app_state (Option<AppState>): The current app state used to generate the song, if any.
  */
 pub struct MusicProgress {
     pub current_samples: u64,
     pub total_samples: u64,
     pub actual_seed: u64,
+    pub app_state: Option<AppState>,
 }
 
 /* MusicPlayer - Manages audio playback state and hardware interaction.
@@ -154,6 +156,7 @@ pub struct MusicProgress {
  *     - playback_start_time (Option<Instant>): Timestamp of when playback last (re)started.
  *     - samples_played_at_pause (u64): Number of samples played before the last pause.
  *     - should_terminate (bool): Flag to signal the playback loop to exit.
+ *     - is_manually_paused (bool): Tracks whether the user explicitly paused playback.
  */
 pub struct MusicPlayer {
     receiver: CrossbeamReceiver<MusicControl>,
@@ -165,13 +168,15 @@ pub struct MusicPlayer {
     playback_start_time: Option<Instant>,
     samples_played_at_pause: u64,
     should_terminate: bool,
+    is_manually_paused: bool,
 }
 
 impl MusicPlayer {
     /* new - Creates a new `MusicPlayer` instance.
      *
      * Initializes the audio output stream and sink, preparing for playback.
-     * The sink starts in a paused state.
+     * The sink starts in a paused state, but is_manually_paused is false
+     * (meaning it will auto-play when audio is loaded).
      *
      * inputs:
      *     - receiver (CrossbeamReceiver<MusicControl>): Channel to receive playback control messages.
@@ -194,13 +199,14 @@ impl MusicPlayer {
             playback_start_time: None,
             samples_played_at_pause: 0,
             should_terminate: false,
+            is_manually_paused: false,
         }
     }
 
     /* play_audio - Loads new audio data into the player and prepares it for playback.
      *
      * Stops any currently playing audio, replaces it with the new data, and resets
-     * playback progress. The sink remains paused after loading; `Resume` is needed to start.
+     * playback progress. If not manually paused, playback will start automatically.
      *
      * inputs:
      *     - &mut self
@@ -226,6 +232,12 @@ impl MusicPlayer {
         self.playback_start_time = None;
 
         self.sink.append(source);
+
+        // Auto-play unless manually paused
+        if !self.is_manually_paused && self.total_samples > 0 {
+            self.playback_start_time = Some(Instant::now());
+            self.sink.play();
+        }
     }
 
     /* should_continue - Checks if the music service should continue its playback loop.
@@ -360,7 +372,7 @@ fn generate_audio_from_state(app_state: &AppState) -> (Vec<f32>, u32, u64) {
  *
  * This function initializes a `MusicPlayer`, generates initial audio based on `initial_app_state`,
  * and then enters a loop to handle control messages (Pause, Resume, Rewind, Terminate)
- * and report playback progress.
+ * and report playback progress. Music plays automatically unless explicitly paused.
  *
  * inputs:
  *     - initial_app_state (AppState): The application state to use for generating the first song.
@@ -379,7 +391,7 @@ pub fn run_music_service(
 
     thread::spawn(move || {
         let mut player = MusicPlayer::new(receiver);
-        let current_app_state_for_generation = initial_app_state;
+        let mut current_app_state_for_generation = initial_app_state;
         let actual_seed_for_current_song: u64;
 
         // Initial audio generation based on initial_app_state
@@ -387,20 +399,14 @@ pub fn run_music_service(
             let (audio_data, sample_rate, seed) =
                 generate_audio_from_state(&current_app_state_for_generation);
             actual_seed_for_current_song = seed;
-            player.play_audio(audio_data, sample_rate); // Prepares sink, remains paused
+            player.play_audio(audio_data, sample_rate); // Now auto-plays unless manually paused
             let _ = progress_sender.send(MusicProgress {
                 // Send initial state
                 current_samples: 0,
                 total_samples: player.total_samples,
                 actual_seed: actual_seed_for_current_song,
+                app_state: Some(current_app_state_for_generation.clone()),
             });
-
-            // Auto-start playback for the initial track
-            if player.total_samples > 0 {
-                // Ensure there's something to play
-                player.playback_start_time = Some(Instant::now());
-                player.sink.play();
-            }
         }
 
         'service_loop: loop {
@@ -408,6 +414,7 @@ pub fn run_music_service(
             loop {
                 match player.receiver.try_recv() {
                     Ok(MusicControl::Pause) => {
+                        player.is_manually_paused = true;
                         if !player.sink.is_paused() && player.playback_start_time.is_some() {
                             let elapsed_since_last_play =
                                 player.playback_start_time.unwrap().elapsed();
@@ -419,6 +426,7 @@ pub fn run_music_service(
                         player.sink.pause();
                     }
                     Ok(MusicControl::Resume) => {
+                        player.is_manually_paused = false;
                         if player.sink.is_paused() && player.total_samples > 0 {
                             player.playback_start_time = Some(Instant::now());
                             player.sink.play();
@@ -430,18 +438,14 @@ pub fn run_music_service(
                         {
                             // Clone the audio data to pass to play_audio
                             let audio_data_clone = audio_data_ref.clone();
-                            player.play_audio(audio_data_clone, sample_rate_val);
-
-                            // After play_audio, the sink is paused by default, so we need to resume it.
-                            // Also, play_audio resets progress, so playback_start_time needs to be set here.
                             player.samples_played_at_pause = 0;
-                            player.playback_start_time = Some(Instant::now()); // Set for immediate play
-                            player.sink.play(); // Start playing from the beginning
+                            player.play_audio(audio_data_clone, sample_rate_val); // Auto-plays unless manually paused
 
                             let _ = progress_sender.send(MusicProgress {
                                 current_samples: 0,
                                 total_samples: player.total_samples,
                                 actual_seed: actual_seed_for_current_song,
+                                app_state: None,
                             });
                         }
                     }
@@ -478,6 +482,7 @@ pub fn run_music_service(
                     current_samples: current_display_samples,
                     total_samples: player.total_samples,
                     actual_seed: actual_seed_for_current_song,
+                    app_state: None,
                 });
                 if send_result.is_err() {
                     player.should_terminate = true;
@@ -487,10 +492,82 @@ pub fn run_music_service(
                     player.sink.pause();
                     player.playback_start_time = None;
                     player.samples_played_at_pause = player.total_samples;
+
+                    // If not manually paused, generate a new song
+                    if !player.is_manually_paused {
+                        let new_app_state = if current_app_state_for_generation.is_random {
+                            // Create a completely new random state
+                            let mut rng = rand::thread_rng();
+                            let mut new_state = current_app_state_for_generation.clone();
+
+                            // Randomize parameters
+                            new_state.scale = [
+                                "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+                            ]
+                            .choose(&mut rng)
+                            .unwrap()
+                            .to_string();
+
+                            new_state.style = [
+                                "Pop",
+                                "Rock",
+                                "Jazz",
+                                "Blues",
+                                "Electronic",
+                                "Ambient",
+                                "Classical",
+                                "Folk",
+                                "Metal",
+                                "Reggae",
+                            ]
+                            .choose(&mut rng)
+                            .unwrap()
+                            .to_string();
+
+                            new_state.bpm = rng.gen_range(60..=180).to_string();
+                            new_state.length = ["1 min", "2 min", "3 min", "5 min", "10 min"]
+                                .choose(&mut rng)
+                                .unwrap()
+                                .to_string();
+                            new_state.seed = "".to_string(); // New random seed
+                            new_state
+                        } else {
+                            // Create a new app state with the same parameters but a new random seed
+                            let mut new_state = current_app_state_for_generation.clone();
+                            new_state.seed = "".to_string(); // This will trigger a new random seed
+                            new_state
+                        };
+
+                        // Generate new audio
+                        let (audio_data, sample_rate, seed) =
+                            generate_audio_from_state(&new_app_state);
+
+                        // Update the current seed
+                        let actual_seed_for_current_song = seed;
+
+                        // Play the new audio
+                        player.play_audio(audio_data, sample_rate);
+
+                        // Reset playback state
+                        player.is_manually_paused = false;
+                        player.samples_played_at_pause = 0;
+
+                        // Send progress update with the new app state
+                        let _ = progress_sender.send(MusicProgress {
+                            current_samples: 0,
+                            total_samples: player.total_samples,
+                            actual_seed: actual_seed_for_current_song,
+                            app_state: Some(new_app_state.clone()),
+                        });
+
+                        // Update the current app state for the next iteration
+                        current_app_state_for_generation = new_app_state;
+                    }
                 }
             }
             thread::sleep(Duration::from_millis(100));
         }
+        // TODO: Loop here?
     });
 }
 

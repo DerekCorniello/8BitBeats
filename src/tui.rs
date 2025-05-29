@@ -289,6 +289,7 @@ pub struct AppState {
     pub seed: String,
     pub input_mode: InputMode,
     pub popup_list_state: ListState,
+    pub is_random: bool,
     pub scales: Vec<String>,
     pub styles: Vec<String>,
     pub lengths: Vec<String>,
@@ -312,6 +313,7 @@ impl Default for AppState {
             seed: "".to_string(),
             input_mode: InputMode::Navigation,
             popup_list_state: ListState::default(),
+            is_random: false,
             scales: vec![
                 "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
             ]
