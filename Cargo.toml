@@ -1,9 +1,12 @@
 [package]
 name = "eightbitbeats"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
+authors = ["Derek Corniello"]
+description = "8BitBeats: A terminal-based 8-bit music generator and player with TUI. Generate, customize, and replay chiptune tracks."
+license = "MIT"
+repository = "https://github.com/DerekCorniello/8BitBeats"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 rodio = "0.17.3"
@@ -13,8 +16,7 @@ crossterm = "0.27.0"
 ratatui = { version = "0.26.1", features = ["crossterm"] }
 dasp_signal = "0.11.0"
 rust-music-theory = "0.2.0"
-rand_chacha = "0.3.1" # Corrected version
+rand_chacha = "0.3.1" 
 crossbeam-channel = "0.5.12"
 textwrap = "0.16.1"
 
-# Removed tonic and prost dependencies as they are not used.

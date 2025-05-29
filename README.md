@@ -1,54 +1,71 @@
+![](https://img.shields.io/badge/Rust-%23000000.svg?style=for-the-badge&logo=rust&color=orange&logoColor=white&labelColor=orange)
+
 # 🎵 8BitBeats - 8-Bit Music Generator
 
 ## 📌 Project Overview
-8BitBeats is a terminal-based 8-bit music generator that allows users to create, customize, and replay chiptune-style music. The tool generates random, yet reproducible, tracks using a deterministic algorithm based on user-defined inputs. It also provides a simple way to manage and replay previously generated tracks via track keys.
+8BitBeats is a terminal-based 8-bit music generator that allows you to create, customize, and replay chiptune-style music. Generate unique, reproducible tracks using a deterministic algorithm based on your inputs. Easily manage and replay tracks via track IDs.
 
-## 🎯 Project Features
-- Random Music Generation: Users can generate unique 8-bit tracks with adjustable parameters.
-- TUI Interface: Provide an intuitive terminal-based UI for an engaging user experience.
-- Customizable Inputs:
-  - Scale (e.g., Major, Minor, Pentatonic, etc.)
+## 🎯 Features
+- **Random Music Generation**: Generate unique 8-bit tracks with adjustable parameters.
+- **TUI Interface**: Intuitive terminal UI for an engaging experience.
+- **Customizable Inputs**:
+  - Scale (C, C#, D, ... B)
+  - Style (Pop, Rock, Jazz, etc.)
   - BPM (Beats Per Minute)
-  - Length (duration)
+  - Length (duration in minutes)
   - Optional seed for controlled randomness
-- Reproducible Tracks:
-  - Each track is assigned a deterministic track ID.
-  - Users can regenerate the same track by providing the same inputs or the track ID.
-- Playback Controls:
-  - Play, Pause, Rewind, and Skip functionalities
+- **Reproducible Tracks**:
+  - Each track is assigned a deterministic track ID
+  - Regenerate the same track by providing the same inputs or track ID
+- **Playback Controls**:
+  - Play, Pause, Rewind, Skip, and Fast Forward
+  - Load tracks by ID and resume playback
+- **Keyboard Shortcuts**:
+  - Navigate UI elements with arrow keys
+  - [p] Play/Pause, [r] Rewind, [s] Skip, [g] Generate, [q] Quit, [?] Toggle Help
 
-## 🔧 Implementation Plan
+## 🚀 Installation
 
-### 1. Track Generation Algorithm
-- Combine user inputs (scale, BPM, length, seed) into a structured format.
-- Map random values to musical notes, rhythms, and instruments.
-- Output as a sequence of tones that form a chiptune-style track.
+1. **Clone the repository:**
+   ```sh
+   git clone https://github.com/DerekCorniello/8BitBeats.git
+   cd 8BitBeats
+   ```
+2. **Build the project:**
+   ```sh
+   cargo build --release
+   ```
+3. **Run the application:**
+   ```sh
+   cargo run --release
+   ```
 
-### 2. Track Playback & Controls
-- Provide TUI controls for play, pause, rewind, and skip.
+## 🕹️ Usage
+- Use the arrow keys to navigate between UI elements.
+- Press [g] to generate a new track, [r] to rewind, [s] to skip, [p] to play/pause.
+- Enter a track ID to replay a specific song.
+- Press [?] to toggle the help menu.
+- All controls are visible in the TUI help panel.
 
-### 3. Track Saving & Replaying
-- Save generated track IDs and their metadata in a JSON file.
-- Allow users to input a track ID to regenerate the exact same track.
+## 💾 Reproducibility
+- Every generated track is assigned a unique, deterministic ID based on your inputs (scale, style, bpm, length, seed).
+- To replay a song, enter its track ID in the loader field and press Enter.
 
-### 4. TUI Development
-- Implement navigation and keyboard shortcuts for ease of use.
+## 🛠️ Dependencies
+See `Cargo.toml` for a full list. Major dependencies include:
+- `rodio` (audio playback)
+- `rand` (randomness)
+- `ratatui`, `crossterm` (terminal UI)
+- `rust-music-theory` (music theory)
+- `crossbeam-channel` (threading)
 
-## 📦 Dependencies and Their Use Cases
+## 📄 License
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
-This project uses several Rust crates to handle music generation, playback, terminal UI, and data persistence. Below is a breakdown of the dependencies by their purpose.
+## 🤝 Contributing
+Pull requests, bug reports, and feature suggestions are welcome! Please open an issue or submit a PR on GitHub.
 
-### Audio Processing and Playback
-- **dasp** – A digital signal processing (DSP) library used for handling and manipulating audio data.  
-- **rodio** – A high-level audio playback library for playing generated 8-bit music.  
-
-### Music Theory and Composition
-- **rust-music-theory** – Provides tools for handling scales, chords, and other music theory concepts needed for procedural generation.  
-
-### Terminal UI (TUI)
-- **ratatui** – A Rust library for building rich terminal user interfaces, used for the interactive experience of *8BitBeats*.  
-- **crossterm** – Handles terminal input/output for navigation and interactivity within the TUI.  
-
-### Data Storage and Reproducibility
-- **serde** – A framework for serializing and deserializing structured data, used to store and load track configurations.  
-- **serde_json** – Enables saving and reading JSON files for user-defined settings and history tracking.  
+## Connect with Me!
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-%230A66C2.svg?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/derek-corniello)
+[![GitHub](https://img.shields.io/badge/GitHub-%23121011.svg?style=for-the-badge&logo=github&logoColor=white)](https://github.com/derekcorniello)
+[![X](https://img.shields.io/badge/X-%231DA1F2.svg?style=for-the-badge&logo=x&logoColor=white)](https://x.com/derekcorniello)
