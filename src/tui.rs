@@ -1341,6 +1341,10 @@ impl<B: Backend> Tui<B> {
                     }
                 }
 
+                if key.kind != event::KeyEventKind::Press {
+                    return Ok(UserAction::NoOp);
+                }
+
                 match self.state.input_mode {
                     InputMode::Navigation => {
                         match key.code {
