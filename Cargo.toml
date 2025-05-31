@@ -1,6 +1,6 @@
 [package]
 name = "eightbitbeats"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 authors = ["Derek Corniello"]
 description = "8BitBeats: A terminal-based 8-bit music generator and player with TUI. Generate, customize, and replay chiptune tracks."
